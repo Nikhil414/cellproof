@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import re
 
-from openpyxl.formula.tokenizer import Token, Tokenizer
+from openpyxl.formula.tokenizer import Token, Tokenizer, TokenizerError
 from openpyxl.utils.cell import column_index_from_string
 
-from unexcel.parser import Binary, Call, Postfix, RefNode, Unary
+from unexcel.model import Unsupported
+from unexcel.parser import Binary, Call, Postfix, RefNode, Unary, parse
 
 CELL = re.compile(r"^(\$?)([A-Za-z]{1,3})(\$?)([0-9]+)$")
 ROW_ONLY = re.compile(r"^\$?[0-9]+$")
@@ -95,6 +96,97 @@ def r1c1_key(formula: str, row: int, col: int) -> str:
         else:
             out.append(tok.value)
     return "".join(out)
+
+
+MAX_ROW = 1048576
+
+
+class Shape:
+    """A formula's tokens with the row numbers of its relative cell references taken out, so the same formula pasted
+    to another row of the column can be predicted as text instead of tokenized again (the tokenizer is most of the
+    compile time). Equal text means equal tokens: only the digits inside reference operands change, and the tokenizer
+    never splits an operand on a digit."""
+
+    __slots__ = ("key", "formula", "segments", "refs", "_parses")
+
+    def __init__(self, formula: str, row: int, col: int):
+        self.formula, self._parses = formula, None
+        key, self.segments, refs = [], [], []  # segments: fixed text, or a reference as [text or row offset, ...]
+        for tok in Tokenizer("=" + formula).items:
+            if tok.type == Token.OPERAND and tok.subtype == Token.RANGE:
+                prefix, ref = _split(tok.value)
+                key.append(prefix + ":".join(_norm(p, row, col) for p in ref.split(":")))
+                refs.append(tok.value)
+                pieces = [prefix]
+                for i, part in enumerate(ref.split(":")):
+                    m = CELL.match(part)
+                    pieces.append(":" if i else "")
+                    if m and not m.group(3):
+                        pieces += [m.group(1) + m.group(2), int(m.group(4)) - row]
+                    else:
+                        pieces.append(part)
+                self.segments.append(pieces)
+            else:
+                key.append(tok.value)
+                self.segments.append(tok.value)
+        self.key, self.refs = "".join(key), tuple(refs)  # refs: this cell's reference texts, as written
+
+    def at(self, row: int) -> tuple[str, tuple[str, ...]] | None:
+        """(formula text, reference texts) of this formula pasted to `row`; None when a reference leaves the sheet."""
+        text, refs = [], []
+        for seg in self.segments:
+            if isinstance(seg, str):
+                text.append(seg)
+                continue
+            out = []
+            for p in seg:
+                if isinstance(p, int):
+                    r = row + p
+                    if not 1 <= r <= MAX_ROW:
+                        return None
+                    out.append(str(r))
+                else:
+                    out.append(p)
+            ref = "".join(out)
+            refs.append(ref)
+            text.append(ref)
+        return "".join(text), tuple(refs)
+
+    def parses(self) -> bool:
+        """Whether the parser accepts it; the same for every cell of the shape (the parser never reads reference text)."""
+        if self._parses is None:
+            try:
+                parse(self.formula)
+                self._parses = True
+            except (Unsupported, RecursionError):
+                self._parses = False
+        return self._parses
+
+
+def lexed(book) -> dict:
+    """Formula cell -> (Shape or None when it does not tokenize, its reference texts left to right). Built once per
+    book; a run of one formula pasted down a column is tokenized once."""
+    got = book.__dict__.get("_lexed")
+    if got is not None:
+        return got
+    got = {}
+    for (sheet, col), rows in book._rows_by_col.items():
+        shape, last = None, None
+        for row in rows:
+            cell = book.cells[(sheet, row, col)]
+            if cell.formula is None:
+                continue
+            seen = shape.at(row) if shape is not None and last == row - 1 else None
+            if seen is None or seen[0] != cell.formula:
+                try:
+                    shape = Shape(cell.formula, row, col)
+                    seen = (cell.formula, shape.refs)
+                except TokenizerError:
+                    shape, seen = None, None
+            got[(sheet, row, col)] = (shape, seen[1] if seen else ())
+            last = row
+    book.__dict__["_lexed"] = got
+    return got
 
 
 def map_refs(node, f):

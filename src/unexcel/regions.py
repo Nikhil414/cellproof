@@ -13,7 +13,7 @@ from openpyxl.utils.cell import get_column_letter
 
 from unexcel.model import Book, Key, Unsupported
 from unexcel.parser import Binary, Call, RefNode, Unary, Postfix, parse, refs
-from unexcel.r1c1 import ROWREF, RUNREF, classify, growing, map_refs, prev_self, r1c1_key
+from unexcel.r1c1 import ROWREF, RUNREF, classify, growing, lexed, map_refs, prev_self
 from unexcel.refs import resolve
 
 MIN_ROWS = 3
@@ -59,15 +59,14 @@ def column_order(cols, reads) -> tuple[list[int], list[int]]:
 
 def _runs(book: Book):
     """(sheet, col, r1, r2) for every maximal run of one pasted-down formula, at least MIN_ROWS rows."""
+    lex = lexed(book)
     for (sheet, col), rows in sorted(book._rows_by_col.items()):
         run, key0 = [], None
         for row in rows + [None]:
             cell = book.cells[(sheet, row, col)] if row is not None else None
             ok = cell is not None and cell.formula is not None and not cell.array and cell.kind != "blank"
-            try:
-                key = r1c1_key(cell.formula, row, col) if ok else None
-            except RecursionError:
-                ok, key = False, None
+            shape = lex[(sheet, row, col)][0] if ok else None
+            ok, key = shape is not None, shape.key if shape is not None else None
             if ok and run and row == run[-1] + 1 and key == key0:
                 run.append(row)
                 continue

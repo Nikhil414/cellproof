@@ -17,7 +17,7 @@ from collections import defaultdict
 
 from unexcel.fenwick import Fenwick
 from unexcel.model import Book, Key, Unsupported
-from unexcel.parser import parse, refs
+from unexcel.r1c1 import lexed
 from unexcel.refs import resolve
 
 CYCLE = "circular reference (or depends on one)"
@@ -48,12 +48,14 @@ def formula_order(book: Book, groups=()) -> tuple[list[Key], dict[Key, str]]:
 
     singles: dict[Key, set[Key]] = {}  # cell -> formula cells it reads one by one
     slices: dict[Key, list[tuple[Column, int, int]]] = {}  # cell -> (column, first, past-last) index into frows
+    lex = lexed(book)
     for key in formulas:
         cell = book.cells[key]
         one: set[Key] = set()
         many: list[tuple[Column, int, int]] = []
+        shape, texts = lex[key]
         try:
-            for text in refs(parse(cell.formula)):
+            for text in (texts if shape is not None and shape.parses() else ()):  # = refs(parse(cell.formula))
                 area = resolve(text, cell.sheet, book)
                 if area.is_single:
                     # a read of another member of the same group is not a wait; a cell reading itself still is
