@@ -1,6 +1,6 @@
 # unexcel: progress
 
-Last updated: 2026-10-18.
+Last updated: 2026-10-19.
 
 ## State
 
@@ -17,7 +17,7 @@ Everything below is on `main`, built test-first, each piece reviewed by a fresh 
 | Open source | MIT license, README with limits, SECURITY.md, CI on Windows/macOS/Linux x Python 3.10-3.13 |
 
 Tests: about 370 (dbt build included), plus 3 workbooks saved by real Excel that all PASS (4 cells UNRESOLVED on
-purpose). The repo is still private; making it public is the owner's decision.
+purpose). Released as 0.1.0: public on GitHub (one-commit history) and on PyPI (`pip install unexcel`).
 
 ## Measured speed (Windows 11 laptop)
 
@@ -64,7 +64,6 @@ What Excel taught us (each has a test in `tests/test_excel_findings.py`):
 
 ## Next
 
-1. Owner: decide whether to make the repo public (see the release checklist in the final report of 2026-10-18).
-2. Lookups as joins (the biggest remaining speed gap).
-3. Plan 3: AI retry loop for failed cells (it sees formula structure only, never values).
-4. Interview analysts; settle the final name (`unexcel` clashes with an R package) and a PyPI release.
+1. Lookups as joins (the biggest remaining speed gap).
+2. Plan 3: AI retry loop for failed cells (it sees formula structure only, never values).
+3. Interview analysts; the name `unexcel` clashes with an R package (the PyPI name is ours).
