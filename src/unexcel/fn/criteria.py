@@ -125,8 +125,9 @@ def countifs(c, args, sheet):
     height = pairs[0][0].r2 - pairs[0][0].r1 + 1
     rows = " UNION ".join(f"SELECT row_num - {a.r1} AS off FROM {CELLS} WHERE {where_area(a)}" for a, _ in pairs)
     tables, joins, cond, blanks = _joined(pairs, "o.off", 0)
-    return Expr(f"(WITH o AS ({rows}) SELECT (SELECT COUNT(*) FILTER (WHERE {cond}) FROM o {joins}) "
-                f"+ CASE WHEN {blanks} THEN {height} - (SELECT COUNT(*) FROM o) ELSE 0 END FROM {', '.join(tables)})", "num")
+    o = f"({rows}) o"  # a derived table, not a CTE: DuckDB cannot bind a CTE inside a subquery on a row's value
+    return Expr(f"(SELECT (SELECT COUNT(*) FILTER (WHERE {cond}) FROM {o} {joins}) "
+                f"+ CASE WHEN {blanks} THEN {height} - (SELECT COUNT(*) FROM {o}) ELSE 0 END FROM {', '.join(tables)})", "num")
 
 
 def _aggregate(c, target: Area, pairs, how: str) -> Expr:
@@ -139,7 +140,7 @@ def _aggregate(c, target: Area, pairs, how: str) -> Expr:
     numbers = "FILTER (WHERE s.kind = 'n')"
     err = NO_ERR
     if keys.may_err:  # a matched error cell makes the result that error
-        err = f"(SELECT s.txt {src} AND s.kind = 'e' ORDER BY s.row_num LIMIT 1)"
+        err = f"(SELECT arg_min(s.txt, s.row_num) {src} AND s.kind = 'e')"  # the first; ORDER BY..LIMIT cannot run row-wise
     if how == "SUM":
         return Expr(f"(SELECT COALESCE(SUM(s.num) {numbers}, CAST(0 AS DOUBLE)) {src})", "num", err)
     if how in ("MIN", "MAX"):

@@ -29,7 +29,14 @@ DuckDB unnests this into one hash join (exact match) or one range join (approxim
 VLOOKUP into a 1000-row table: 1k rows verify 5.7 s -> 0.1 s; 50k rows 8.9 s total, all PASS. Cell mode (a lookup not
 in a region) costs about 20% more per cell; accepted, since pasted-down lookups no longer use it.
 
-## Not covered
+## Criteria functions (same day)
 
-COUNTIF(S)/SUMIF(S)/AVERAGEIF(S) with a criterion from the row: their nested criteria parsing still cannot be planned
-row-wise and stays in cell mode (`test_a_column_duckdb_cannot_plan_is_rejected_with_its_reason...` uses it).
+Most of the *IF(S) family already planned row-wise. Two forms did not, and both are fixed:
+
+- COUNTIFS built its driving rows in a `WITH o AS (...)` inside the subquery: DuckDB fails to bind it ("inequal types
+  (VARCHAR != DOUBLE)"). Now a derived table.
+- SUMIF/AVERAGEIF(S)/... over a sum range that can hold an error found the first error with `ORDER BY ... LIMIT 1`.
+  Now `arg_min(txt, row_num)`.
+
+Measured: COUNTIFS with two criteria, 1k rows, verify 29.0 s -> 0.1 s. No known formula now fails to plan row-wise;
+the fallback test forces a failure with a patched `_validate`.

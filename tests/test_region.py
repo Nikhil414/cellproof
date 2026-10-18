@@ -347,8 +347,12 @@ def test_a_lookup_column_in_a_region_never_crashes_and_equals_cell_mode(col):
     _whole_run_equal(book_of({"S": _lookup_sheet({col: LOOKUPS[col], "C": LOOKUPS["C"]})}))
 
 
-def test_a_column_duckdb_cannot_plan_is_rejected_with_its_reason_and_its_sibling_is_kept():
-    book = book_of({"S": _lookup_sheet({"J": LOOKUPS["J"], "C": LOOKUPS["C"]})})  # COUNTIFS on a row's value
+def test_a_column_duckdb_cannot_plan_is_rejected_with_its_reason_and_its_sibling_is_kept(monkeypatch):
+    import unexcel.region as region_mod
+    real = region_mod._validate  # no known formula fails to plan any more: make column J's SQL fail
+    monkeypatch.setattr(region_mod, "_validate", lambda wide, rows: "Binder Error: boom" if " AS col_j" in wide
+                        else real(wide, rows))
+    book = book_of({"S": _lookup_sheet({"J": LOOKUPS["J"], "C": LOOKUPS["C"]})})
     batch, rejected = compile_region(Compiler(book), find_regions(book).regions[0])
     assert 10 in rejected and "DuckDB" in rejected[10]
     assert batch is not None and {s.key[2] for s in batch} == {3}
@@ -426,7 +430,7 @@ def test_a_literal_that_looks_like_the_dbt_cte_does_not_reject_the_column():
     assert all(same(got[k], cell_mode[k]) for k in region.keys())
 
 
-ROW_WISE = sorted(set(LOOKUPS) - {"C", "J"})
+ROW_WISE = sorted(set(LOOKUPS) - {"C"})
 
 
 @pytest.mark.parametrize("col", ROW_WISE)
@@ -474,6 +478,51 @@ def _text_lookup_sheet(formulas):
 @pytest.mark.parametrize("col", sorted(TEXT_LOOKUPS))
 def test_text_and_approximate_lookups_compile_row_wise_and_equal_cell_mode(col):
     book = book_of({"S": _text_lookup_sheet({col: TEXT_LOOKUPS[col]})})
+    notes = compile_book(book).notes
+    assert any("-> model" in n for n in notes) and not any("cell mode" in n for n in notes), notes
+    _whole_run_equal(book)
+
+
+CRITERIA = {
+    "B": "=COUNTIF($E$1:$E$8,A{r})",
+    "C": '=COUNTIF($E$1:$E$8,">"&A{r})',
+    "D": '=COUNTIF($E$1:$E$8,"<>"&A{r})',
+    "G": "=SUMIF($E$1:$E$8,A{r},$F$1:$F$8)",
+    "H": '=SUMIFS($F$1:$F$8,$E$1:$E$8,"<="&A{r},$T$1:$T$8,"x*")',
+    "I": '=COUNTIFS($E$1:$E$8,">="&A{r},$T$1:$T$8,"<>y")',
+    "J": "=AVERAGEIF($E$1:$E$8,A{r},$F$1:$F$8)",
+    "K": '=MAXIFS($F$1:$F$8,$E$1:$E$8,"<"&A{r})',
+    "L": '=MINIFS($F$1:$F$8,$T$1:$T$8,A{r}&"*")',
+    "M": "=AVERAGEIFS($F$1:$F$8,$E$1:$E$8,A{r},$T$1:$T$8,\"<>\")",
+}
+
+
+CRITERIA_VALUES = {"num": [2.0, 0.0, 5.0, 1.0, -1.0, 2.0, 99.0, 0.5],
+                   "txt": ["2", "a", "x", "b?", "A", "x*", "TRUE", "~*"]}
+
+
+def _criteria_sheet(formulas, kind):
+    """Criteria from the row (numbers, or text with wildcards), over numbers, text numbers, TRUE, blanks, an error."""
+    spec = {"A1": "crit"}
+    for i, v in enumerate(CRITERIA_VALUES[kind], 2):
+        spec[f"A{i}"] = v
+    column_e = [2.0, "2", "a", None, True, 5.0, "b1", 0.0]
+    column_f = [10.0, 20.0, ("=1/0", "#DIV/0!"), 40.0, "t", 60.0, None, 80.0]
+    column_t = ["x1", "y", None, "xx", "x", "y", "z", ""]
+    for i in range(8):
+        for col, values in (("E", column_e), ("F", column_f), ("T", column_t)):
+            if values[i] is not None:
+                spec[f"{col}{i + 1}"] = values[i]
+    for col, f in formulas.items():
+        for r in range(2, 10):
+            spec[f"{col}{r}"] = (f.format(r=r), 0.0)
+    return spec
+
+
+@pytest.mark.parametrize("kind", sorted(CRITERIA_VALUES))
+@pytest.mark.parametrize("col", sorted(CRITERIA))
+def test_criteria_from_the_row_compile_row_wise_and_equal_cell_mode(col, kind):
+    book = book_of({"S": _criteria_sheet({col: CRITERIA[col]}, kind)})
     notes = compile_book(book).notes
     assert any("-> model" in n for n in notes) and not any("cell mode" in n for n in notes), notes
     _whole_run_equal(book)
