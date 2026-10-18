@@ -28,9 +28,9 @@ DuckDB rejected SQL that unexcel generated (a bug in unexcel; the message names 
 Python 3.10 or newer.
 
 ```bash
-pip install git+https://github.com/Nikhil414/unexcel
-pip install "unexcel[dbt] @ git+https://github.com/Nikhil414/unexcel"      # also run dbt build (--dbt)
-pip install "unexcel[compute] @ git+https://github.com/Nikhil414/unexcel"  # answer key for files never saved in Excel
+pip install unexcel
+pip install "unexcel[dbt]"      # also run dbt build (--dbt)
+pip install "unexcel[compute]"  # answer key for files never saved in Excel
 ```
 
 Runtime dependencies are only `openpyxl` and `duckdb`.
