@@ -14,6 +14,7 @@ Everything below is on `main`, built test-first, each piece reviewed by a fresh 
 | Plan 2c | speed in cell mode: Fenwick-tree dependency order, range index, weight-based batches, small dbt models |
 | Plan 2d | table mode slice 1: regions (columns repeating one formula) compile to one readable statement |
 | Slice 2 | a region with a cell between its columns splits instead of dissolving; running totals (`=C1+B2`, `=SUM($B$2:B2)`) become window functions |
+| Lookups row-wise | VLOOKUP, HLOOKUP, MATCH, INDEX, XLOOKUP pasted down compile into the region's statement (one join each instead of one query per cell) |
 | Open source | MIT license, README with limits, SECURITY.md, CI on Windows/macOS/Linux x Python 3.10-3.13 |
 
 Tests: about 370 (dbt build included), plus 3 workbooks saved by real Excel that all PASS (4 cells UNRESOLVED on
@@ -26,7 +27,8 @@ purpose). Released as 0.1.0: public on GitHub (one-commit history) and on PyPI (
 | 200k formulas (4 columns x 50k rows, one running total) | 390 s | 31.0 s (read 9.3, compile 19.9, verify 1.6, emit 0.2), 4 batches, all PASS |
 | Flat `=A*1.1`, 20k cells | verify 28.3 s | verify 0.2 s |
 | `--dbt`, flat 20k | 225.9 s, 213 MB | 9.6 s, 1.6 MB |
-| VLOOKUP per row, 1k rows | 5.9 s | 6.1 s (lookups still run cell by cell) |
+| VLOOKUP per row, 1k rows | 5.9 s | verify 0.1 s (was 5.7 s), 1 batch |
+| VLOOKUP per row, 50k rows | - | 8.9 s (read 2.2, compile 6.1, verify 0.6), all PASS |
 
 ## Real Excel validation (2026-10-14)
 
@@ -52,8 +54,9 @@ What Excel taught us (each has a test in `tests/test_excel_findings.py`):
 
 ## Known gaps
 
-- Lookups per row (VLOOKUP, INDEX/MATCH, XLOOKUP, COUNTIFS with a row-wise criterion) stay in cell mode: DuckDB cannot
-  plan them row-wise. Next speed piece: lookups as joins.
+- The *IF(S) family with a row-wise criterion (`=COUNTIFS($E:$E,">"&A2)`) stays in cell mode: DuckDB cannot plan it
+  row-wise yet. Next speed piece: the criteria engine in the same aggregate form as the lookups.
+- A lookup outside a region (cell mode) is about 20% slower than before the row-wise form (1k cells: 6.9 s, was 5.8 s).
 - Running totals other than sums (`=C1*1.05+B2`, `=MAX(C1,B2)`), other functions over growing ranges, and a split
   piece that needs a second split stay in cell mode.
 - Compile time now dominates the 200k run (19.9 of 31.0 s).
@@ -64,6 +67,6 @@ What Excel taught us (each has a test in `tests/test_excel_findings.py`):
 
 ## Next
 
-1. Lookups as joins (the biggest remaining speed gap).
+1. Criteria functions row-wise (COUNTIFS/SUMIFS on a row's value).
 2. Plan 3: AI retry loop for failed cells (it sees formula structure only, never values).
 3. Interview analysts; the name `unexcel` clashes with an R package (the PyPI name is ours).

@@ -3,6 +3,10 @@
 The value found is read from the cells table. Its type comes from the cells the range holds: one type ->
 that type; mixed, or text with empty cells -> 'any' (known when the SQL runs). An empty cell found reads
 as 0, like Excel. Exact matching of text ignores case and (except XLOOKUP's default) honours wildcards.
+
+Every search is an aggregate (arg_min/arg_max by position) over a table that does not depend on the formula's row;
+only the WHERE does. DuckDB plans such a subquery as one join for a whole region, where ORDER BY ... LIMIT 1 or a
+LEFT JOIN on the row's values cannot be planned at all.
 """
 from __future__ import annotations
 
@@ -33,21 +37,21 @@ def _type_of(c, area: Area, keys) -> str:
     return "any"
 
 
-def _read(src: str, typ: str, err: str) -> Expr:
-    """The cell `r` that the one-row query `src` finds; r is NULL when the cell is empty."""
+def _read(pick, typ: str, err: str, r: str = "k.r_") -> Expr:
+    """The cell found. pick(x, default) is x of that cell, default when the cell is empty, NULL when nothing is
+    found; r prefixes the cell's columns."""
     if typ == "num":
-        return Expr(f"(SELECT COALESCE(r.num, 0) {src})", "num", err)
+        return Expr(pick(f"{r}num", "0"), "num", err)
     if typ == "txt":
-        return Expr(f"(SELECT COALESCE(r.txt, '') {src})", "txt", err)
+        return Expr(pick(f"{r}txt", "''"), "txt", err)
     if typ == "bool":
-        return Expr(f"(SELECT r.num <> 0 {src})", "bool", err)
-    return any_of(f"(SELECT COALESCE(r.kind, 'n') {src})", f"(SELECT COALESCE(r.num, 0) {src})",
-                  f"(SELECT COALESCE(r.txt, '') {src})", err)
+        return Expr(pick(f"{r}num <> 0", "FALSE"), "bool", err)
+    return any_of(pick(f"{r}kind", "'n'"), pick(f"{r}num", "0"), pick(f"{r}txt", "''"), err)
 
 
-def _found_error(src: str, missing: str) -> str:
-    """'missing' when src finds no row, the cell's own error when it holds one, else NULL."""
-    found = f"(SELECT CASE WHEN r.kind = 'e' THEN r.txt ELSE '' END {src})"
+def _found_error(pick, missing: str) -> str:
+    """'missing' when nothing is found, the cell's own error when it holds one, else NULL."""
+    found = pick("CASE WHEN k.r_kind = 'e' THEN k.r_txt END", "''")
     return f"(CASE WHEN {found} IS NULL THEN '{missing}' WHEN {found} = '' THEN NULL ELSE {found} END)"
 
 
@@ -101,20 +105,33 @@ def _require_sorted(c, line: Area, descending: bool, fname: str) -> None:
                           "on unsorted data Excel's answer depends on its binary search")
 
 
-def _search(c, x: Expr, line: Area, mode: str, wild: bool, last: bool | None = None) -> tuple[str, str]:
-    """(FROM...LIMIT 1 tail selecting matching cell `k` of the 1-D range `line`, its position SQL)."""
-    by_row = line.c1 == line.c2
-    pos = "k.row_num" if by_row else "k.col_num"
-    where = f"FROM {CELLS} k WHERE {where_area(line, 'k')}"
-    if mode == "exact":
-        cond, order = _exact("k", x, wild), f"{pos} {'DESC' if last else 'ASC'}"
-    elif mode == "le":  # largest value <= x; the last of equal ones, as Excel's search on sorted data
-        cond, key = _near("k", x, "<=")
-        order = f"{key} DESC, {pos} {'ASC' if last is False else 'DESC'}"
-    else:  # "ge": smallest value >= x
-        cond, key = _near("k", x, ">=")
-        order = f"{key} ASC, {pos} {'DESC' if last else 'ASC'}"
-    return f"{where} AND {cond} ORDER BY {order} LIMIT 1", pos
+class Search:
+    """The cell `k` of the 1-D range `line` that a lookup finds. With `back` = (sheet SQL, join condition on k and r)
+    also the cell r it returns, read as k.r_kind, k.r_num, k.r_txt (NULL when r is empty)."""
+
+    def __init__(self, x: Expr, line: Area, mode: str, wild: bool, last: bool | None = None, back=None):
+        self.pos = "k.row_num" if line.c1 == line.c2 else "k.col_num"
+        table = f"{CELLS} k"
+        if back:
+            table = (f"(SELECT k.*, r.kind AS r_kind, r.num AS r_num, r.txt AS r_txt FROM {CELLS} k "
+                     f"LEFT JOIN {CELLS} r ON r.sheet = {back[0]} AND {back[1]} WHERE {where_area(line, 'k')}) k")
+        if mode == "exact":  # the first match, the last when `last`
+            cond, self.agg, self.key = _exact("k", x, wild), "arg_max" if last else "arg_min", self.pos
+        elif mode == "le":  # largest value <= x; the last of equal ones, as Excel's search on sorted data
+            cond, key = _near("k", x, "<=")
+            self.agg, self.key = "arg_max", f"({key}, {'-' if last is False else ''}{self.pos})"
+        else:  # "ge": smallest value >= x, the first of equal ones
+            cond, key = _near("k", x, ">=")
+            self.agg, self.key = "arg_min", f"({key}, {'-' if last else ''}{self.pos})"
+        self.src = f"FROM {table} WHERE {where_area(line, 'k')} AND {cond}"
+
+    def pick(self, value: str, default: str | None = None) -> str:
+        if default is not None:  # arg_min skips a NULL value: the cell would look not found
+            value = f"COALESCE({value}, {default})"
+        return f"(SELECT {self.agg}({value}, {self.key}) {self.src})"
+
+    def hit(self) -> str:
+        return f"(EXISTS (SELECT 1 {self.src}))"
 
 
 def int_literal(node) -> int | None:
@@ -167,11 +184,9 @@ def _table_lookup(fname: str, by_row: bool):
         x = _xlookup_x(c, args, sheet)
         if not exact:
             _require_sorted(c, line, False, fname)
-        tail, _ = _search(c, x, line, "exact" if exact else "le", wild=exact)
-        tail = tail.replace(f"FROM {CELLS} k WHERE",
-                            f"FROM {CELLS} k LEFT JOIN {CELLS} r ON r.sheet = k.sheet AND {hit} WHERE", 1)
+        found = Search(x, line, "exact" if exact else "le", wild=exact, back=("k.sheet", hit))
         keys = c.ready(target)
-        return _read(tail, _type_of(c, target, keys), errs(x.err, _found_error(tail, "#N/A")))
+        return _read(found.pick, _type_of(c, target, keys), errs(x.err, _found_error(found.pick, "#N/A")))
     return fn
 
 
@@ -196,10 +211,10 @@ def match(c, args, sheet):
     x = _xlookup_x(c, args, sheet)
     if kind != 0:
         _require_sorted(c, line, kind == -1, "MATCH")
-    tail, pos = _search(c, x, line, {0: "exact", 1: "le", -1: "ge"}[kind], wild=True)
+    found = Search(x, line, {0: "exact", 1: "le", -1: "ge"}[kind], wild=True)
     first = line.r1 if line.c1 == line.c2 else line.c1
-    return Expr(f"(SELECT CAST({pos} - {first} + 1 AS DOUBLE) {tail})", "num",
-                errs(x.err, f"(CASE WHEN (SELECT 1 {tail}) IS NULL THEN '#N/A' END)"))
+    return Expr(found.pick(f"CAST({found.pos} - {first} + 1 AS DOUBLE)"), "num",
+                errs(x.err, f"(CASE WHEN NOT {found.hit()} THEN '#N/A' END)"))
 
 
 @register("XLOOKUP")
@@ -223,18 +238,16 @@ def xlookup(c, args, sheet):
         raise Unsupported("XLOOKUP return range must be one row or column the size of the lookup range")
     x = _xlookup_x(c, args, sheet)
     mode = {0: "exact", 2: "exact", -1: "le", 1: "ge"}[match_mode]
-    tail, _ = _search(c, x, look, mode, wild=match_mode == 2, last=search_mode == -1)
     hit = (f"r.row_num = k.row_num + {back.r1 - look.r1} AND r.col_num = {back.c1}" if by_row
            else f"r.col_num = k.col_num + {back.c1 - look.c1} AND r.row_num = {back.r1}")
-    tail = tail.replace(f"FROM {CELLS} k WHERE",
-                        f"FROM {CELLS} k LEFT JOIN {CELLS} r ON r.sheet = {lit_str(back.sheet).sql} AND {hit} WHERE", 1)
+    search = Search(x, look, mode, wild=match_mode == 2, last=search_mode == -1, back=(lit_str(back.sheet).sql, hit))
     keys = c.ready(back)
-    found = _read(tail, _type_of(c, back, keys), errs(x.err, _found_error(tail, "#N/A")))
+    found = _read(search.pick, _type_of(c, back, keys), errs(x.err, _found_error(search.pick, "#N/A")))
     if len(args) < 4 or args[3] is None:
         return found
     missing = c.expr(args[3], sheet)
     found, missing = unify_all([found, missing])
-    hit_sql = f"((SELECT 1 {tail}) IS NOT NULL)"
+    hit_sql = search.hit()
     pick_err = f"(CASE WHEN {hit_sql} THEN {found.err} ELSE {missing.err} END)"
 
     def case(a: str, b: str) -> str:
@@ -261,11 +274,14 @@ def index(c, args, sheet):
         row, col = first, second
     r = f"(CASE WHEN trunc({row.sql}) BETWEEN 1 AND {height} THEN CAST(trunc({row.sql}) AS BIGINT) END)"
     k = f"(CASE WHEN trunc({col.sql}) BETWEEN 1 AND {width} THEN CAST(trunc({col.sql}) AS BIGINT) END)"
-    src = (f"FROM (SELECT 1) one LEFT JOIN {CELLS} r ON r.sheet = {lit_str(area.sheet).sql} "
+    src = (f"FROM {CELLS} r WHERE r.sheet = {lit_str(area.sheet).sql} "
            f"AND r.row_num = {area.r1} - 1 + {r} AND r.col_num = {area.c1} - 1 + {k}")
+
+    def pick(value: str, default: str) -> str:  # at most one cell matches; none when it is empty
+        return f"COALESCE((SELECT max({value}) {src}), {default})"
     bounds = f"(CASE WHEN {r} IS NULL OR {k} IS NULL OR {r} < 1 OR {r} > {height} OR {k} < 1 OR {k} > {width} THEN '#REF!' END)"
-    found = f"(SELECT CASE WHEN r.kind = 'e' THEN r.txt END {src})"
-    return _read(src, _type_of(c, area, keys), errs(row.err, col.err, bounds, found))
+    found = f"(SELECT max(CASE WHEN r.kind = 'e' THEN r.txt END) {src})"
+    return _read(pick, _type_of(c, area, keys), errs(row.err, col.err, bounds, found), "r.")
 
 
 @register("CHOOSE")

@@ -347,10 +347,10 @@ def test_a_lookup_column_in_a_region_never_crashes_and_equals_cell_mode(col):
     _whole_run_equal(book_of({"S": _lookup_sheet({col: LOOKUPS[col], "C": LOOKUPS["C"]})}))
 
 
-def test_index_match_pasted_down_is_rejected_with_a_duckdb_reason_and_its_sibling_is_kept():
-    book = book_of({"S": _lookup_sheet({"B": LOOKUPS["B"], "C": LOOKUPS["C"]})})
+def test_a_column_duckdb_cannot_plan_is_rejected_with_its_reason_and_its_sibling_is_kept():
+    book = book_of({"S": _lookup_sheet({"J": LOOKUPS["J"], "C": LOOKUPS["C"]})})  # COUNTIFS on a row's value
     batch, rejected = compile_region(Compiler(book), find_regions(book).regions[0])
-    assert 2 in rejected and "DuckDB" in rejected[2]
+    assert 10 in rejected and "DuckDB" in rejected[10]
     assert batch is not None and {s.key[2] for s in batch} == {3}
     _whole_run_equal(book)
 
@@ -424,3 +424,56 @@ def test_a_literal_that_looks_like_the_dbt_cte_does_not_reject_the_column():
     got, cell_mode, batch, rejected = run_region(book, region)
     assert rejected == {} and batch is not None
     assert all(same(got[k], cell_mode[k]) for k in region.keys())
+
+
+ROW_WISE = sorted(set(LOOKUPS) - {"C", "J"})
+
+
+@pytest.mark.parametrize("col", ROW_WISE)
+def test_a_lookup_column_compiles_row_wise(col):
+    book = book_of({"S": _lookup_sheet({col: LOOKUPS[col], "C": LOOKUPS["C"]})})
+    batch, rejected = compile_region(Compiler(book), find_regions(book).regions[0])
+    assert rejected == {}
+    assert batch is not None and {s.key[2] for s in batch} == {3, ord(col) - 64}
+    _whole_run_equal(book)
+
+
+TEXT_LOOKUPS = {
+    "B": "=VLOOKUP(A{r},$E$1:$F$6,2,FALSE)",  # first of duplicates, any case, wildcards, empty and error targets
+    "C": "=XLOOKUP(A{r},$E$1:$E$6,$F$1:$F$6,\"none\",0,-1)",  # last match
+    "D": "=MATCH(A{r},$E$1:$E$6,0)",
+    "G": "=XLOOKUP(A{r},$E$1:$E$6,$F$1:$F$6,\"none\",2)",  # wildcard mode
+    "H": "=INDEX($F$1:$F$6,MATCH(A{r},$E$1:$E$6,0))",
+    "I": "=VLOOKUP(N{r},$K$1:$L$4,2)",  # approximate on sorted numbers
+    "J": "=MATCH(N{r},$K$1:$K$4,1)",
+    "M": "=XLOOKUP(N{r},$K$1:$K$4,$L$1:$L$4,-1,1)",  # next larger
+}
+
+
+def _text_lookup_sheet(formulas):
+    spec = {"A1": "key", "N1": "amount"}
+    keys = ["apple", "APPLE", "b*", "pear", "zzz", "x?z", "nope", "kiwi"]
+    amounts = [5.0, 10.0, 15.0, 0.0, 99.0, 30.0, 7.5, 25.0]
+    for i, r in enumerate(range(2, 10)):
+        spec[f"A{r}"] = keys[i]
+        spec[f"N{r}"] = amounts[i]
+    table = [("Apple", 1.0), ("banana", "yellow"), ("apple", 3.0), ("pear", None), ("xyz", ("=1/0", "#DIV/0!")),
+             ("kiwi", True)]
+    for i, (k, v) in enumerate(table, 1):
+        spec[f"E{i}"] = k
+        if v is not None:
+            spec[f"F{i}"] = v
+    for i, (k, v) in enumerate([(0.0, "low"), (10.0, "mid"), (20.0, "high"), (30.0, "top")], 1):
+        spec[f"K{i}"], spec[f"L{i}"] = k, v
+    for col, f in formulas.items():
+        for r in range(2, 10):
+            spec[f"{col}{r}"] = (f.format(r=r), 0.0)
+    return spec
+
+
+@pytest.mark.parametrize("col", sorted(TEXT_LOOKUPS))
+def test_text_and_approximate_lookups_compile_row_wise_and_equal_cell_mode(col):
+    book = book_of({"S": _text_lookup_sheet({col: TEXT_LOOKUPS[col]})})
+    notes = compile_book(book).notes
+    assert any("-> model" in n for n in notes) and not any("cell mode" in n for n in notes), notes
+    _whole_run_equal(book)
