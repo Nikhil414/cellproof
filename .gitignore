@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*_dbt/
+*.duckdb
+target/
+logs/
+examples/commission_unsaved.xlsx
+examples/errors_unsaved.xlsx
+.superpowers/
+*.egg-info/
+dist/
+build/

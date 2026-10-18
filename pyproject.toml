@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "unexcel"
+version = "0.1.0"
+description = "Turn an Excel workbook into SQL (a dbt project on DuckDB) and prove every number matches."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Nikhil414" }]
+keywords = ["excel", "xlsx", "sql", "dbt", "duckdb", "migration", "spreadsheet"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Office/Business :: Financial :: Spreadsheet",
+]
+dependencies = ["openpyxl>=3.1", "duckdb>=1.1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "jinja2>=3.1"]
+dbt = ["dbt-duckdb>=1.8"]
+compute = ["formulas>=1.3.4,<1.4"]
+
+[project.urls]
+Homepage = "https://github.com/Nikhil414/unexcel"
+Issues = "https://github.com/Nikhil414/unexcel/issues"
+
+[project.scripts]
+unexcel = "unexcel.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/unexcel"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]
