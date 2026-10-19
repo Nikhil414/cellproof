@@ -16,6 +16,15 @@ FAIL 229 -> 10 (all 10 in files LibreOffice saved, which the report now says), n
 - **Locale-dependent text** (`"1,000"`, `"1/2/2020"`) is UNRESOLVED instead of a wrong `#VALUE!`.
 - **Report:** warns when the file was not last saved by Excel; CHAR above 127 in a Mac-calculated file is UNRESOLVED.
 
+From a user's practice workbook (3 PASS / 47 UNRESOLVED -> 48 PASS / 2 UNRESOLVED):
+
+- **Implicit intersection:** a one-column or one-row range where one value is expected takes the formula's own row or
+  column (`=IF(E$3:E$41="F",B$3:B$41)`); outside it is `#VALUE!`. A range IF passes into another function is
+  UNRESOLVED (Excel gives that function the whole range).
+- **`INDIRECT("Sales")`** of fixed text is the reference it names (dependencies included).
+- **MODE / MODE.SNGL.**
+- **A bare word is a name, never a column:** `=i` without a name `i` was read as column I.
+
 ## 0.2.0 (2026-10-19)
 
 - **Renamed** from `unexcel` to `cellproof` (the old name clashed with an R package): `pip install cellproof`, command

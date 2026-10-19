@@ -101,6 +101,26 @@ def r1c1_key(formula: str, row: int, col: int) -> str:
 MAX_ROW = 1048576
 
 
+def _indirect_text(items, i: int) -> bool:
+    """Token i is the fixed text of INDIRECT("A1") (or with TRUE), which the parser turns into that reference."""
+    tok = items[i]
+    if not (tok.type == Token.OPERAND and tok.subtype == Token.TEXT and i > 0):
+        return False
+    j = i - 1
+    while j > 0 and items[j].type == Token.WSPACE:
+        j -= 1
+    before = items[j]
+    if not (before.type == Token.FUNC and before.subtype == Token.OPEN
+            and before.value.upper().removeprefix("_XLFN.") == "INDIRECT("):
+        return False
+    rest = [t for t in items[i + 1:i + 7] if t.type != Token.WSPACE][:3]
+    if rest and rest[0].type == Token.FUNC and rest[0].subtype == Token.CLOSE:
+        return tok.value[1:-1].strip() != ""
+    return (len(rest) >= 3 and rest[0].type == Token.SEP and rest[1].subtype == Token.LOGICAL
+            and rest[1].value.upper() == "TRUE" and rest[2].type == Token.FUNC and rest[2].subtype == Token.CLOSE
+            and tok.value[1:-1].strip() != "")
+
+
 class Shape:
     """A formula's tokens with the row numbers of its relative cell references taken out, so the same formula pasted
     to another row of the column can be predicted as text instead of tokenized again (the tokenizer is most of the
@@ -111,9 +131,15 @@ class Shape:
 
     def __init__(self, formula: str, row: int, col: int):
         self.formula, self._parses = formula, None
-        key, self.segments, refs = [], [], []  # segments: fixed text, or a reference as [text or row offset, ...]
-        for tok in Tokenizer("=" + formula).items:
-            if tok.type == Token.OPERAND and tok.subtype == Token.RANGE:
+        # segments: fixed text, a reference as [text or row offset, ...], or (text, reference) for INDIRECT("A1")
+        key, self.segments, refs = [], [], []
+        items = Tokenizer("=" + formula).items
+        for i, tok in enumerate(items):
+            if _indirect_text(items, i):
+                key.append(tok.value)
+                refs.append(tok.value[1:-1].replace('""', '"'))
+                self.segments.append((tok.value, refs[-1]))
+            elif tok.type == Token.OPERAND and tok.subtype == Token.RANGE:
                 prefix, ref = _split(tok.value)
                 key.append(prefix + ":".join(_norm(p, row, col) for p in ref.split(":")))
                 refs.append(tok.value)
@@ -137,6 +163,10 @@ class Shape:
         for seg in self.segments:
             if isinstance(seg, str):
                 text.append(seg)
+                continue
+            if isinstance(seg, tuple):
+                text.append(seg[0])
+                refs.append(seg[1])
                 continue
             out = []
             for p in seg:

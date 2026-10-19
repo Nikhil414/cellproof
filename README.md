@@ -76,10 +76,10 @@ reader -> regions -> dependency graph -> compiler -> verifier -> dbt emitter -> 
    code.
 6. **Emit** the dbt project and the report.
 
-93 Excel functions are supported: ABS, AND, AVERAGE, AVERAGEIF(S), CEILING, CHAR, CHOOSE, CLEAN, CONCAT(ENATE),
+94 Excel functions are supported: ABS, AND, AVERAGE, AVERAGEIF(S), CEILING, CHAR, CHOOSE, CLEAN, CONCAT(ENATE),
 COUNT, COUNTA, COUNTBLANK, COUNTIF(S), DATE, DATEDIF, DAY, DAYS, DAYS360, EDATE, EOMONTH, EXACT, EXP, FIND, FLOOR,
 HLOOKUP, IF, IFERROR, IFNA, IFS, INDEX, INT, IS* (BLANK, ERR, ERROR, LOGICAL, NA, NUMBER, TEXT), LEFT, LEN, LN, LOG,
-LOG10, LOWER, MATCH, MAX, MAXIFS, MEDIAN, MID, MIN, MINIFS, MOD, MONTH, MROUND, NA, NOT, OR, PI, POWER, PRODUCT,
+LOG10, LOWER, MATCH, MAX, MAXIFS, MEDIAN, MID, MIN, MINIFS, MOD, MODE, MONTH, MROUND, NA, NOT, OR, PI, POWER, PRODUCT,
 PROPER, REPLACE, REPT, RIGHT, ROUND(UP/DOWN), SEARCH, SIGN, SQRT, SUBSTITUTE, SUBTOTAL, SUM, SUMIF(S), SUMPRODUCT,
 SWITCH, TEXT, TEXTJOIN, TRIM, TRUE/FALSE, TRUNC, UPPER, VALUE, VLOOKUP, WEEKDAY, XLOOKUP, XOR, YEAR.
 
@@ -92,9 +92,13 @@ COUNTIFS/SUMIFS with a criterion from the row run at the same speed.
 cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each reported with a reason:
 
 - **File formats:** `.xlsx` and `.xlsm` only (no `.xls`, `.xlsb`, `.ods`). Macros (VBA) are ignored.
-- **Not supported:** array formulas and dynamic arrays, volatile functions (`NOW`, `TODAY`, `RAND`, `OFFSET`,
-  `INDIRECT`), functions outside the list above, external workbooks, structured table references (`Table1[@Col]`),
-  INDEX used as a reference, the 1904 date system in TEXT date formats.
+- **Not supported:** array formulas and dynamic arrays, volatile functions (`NOW`, `TODAY`, `RAND`, `OFFSET`, and
+  `INDIRECT` of text built while the sheet runs; `INDIRECT("Sales")` is fine), functions outside the list above,
+  external workbooks, structured table references (`Table1[@Col]`), INDEX used as a reference, the 1904 date system in
+  TEXT date formats.
+- **Ranges where one value is expected** (`=IF(E$3:E$41="F",B$3:B$41)`) take the formula's own row or column, as
+  Excel does (implicit intersection). A range that IF/IFERROR/CHOOSE hands to another function
+  (`MAX(IF(c,A1:A9,0))`, where Excel uses the whole range) is UNRESOLVED.
 - **Approximate lookups on unsorted data** (MATCH/VLOOKUP/HLOOKUP with match type 1/-1): UNRESOLVED, because Excel's
   answer then depends on its binary search.
 - **Text to number:** only plain numbers convert (`"3"`, `" -1.5e3 "`). Text Excel reads with the computer's language

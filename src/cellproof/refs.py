@@ -50,6 +50,8 @@ def resolve(text: str, sheet: str, book: Book) -> Area:
     if sheet not in book.sheets:
         raise Unsupported(f"unknown sheet {sheet!r}")
     try:
+        if ":" not in ref and not any(ch.isdigit() for ch in ref):
+            raise ValueError  # "I" alone is a name; openpyxl would read it as column I, which Excel writes as I:I
         c1, r1, c2, r2 = range_boundaries(ref.replace("$", ""))
     except ValueError:
         raise Unsupported(f"unknown name {text!r}") from None

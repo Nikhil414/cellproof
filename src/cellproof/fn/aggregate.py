@@ -144,6 +144,22 @@ def median(c, args, sheet):
                 errs(_errs(c, ranges, []), f"(CASE WHEN (SELECT COUNT(*) {values}) = 0 THEN '#NUM!' END)"))
 
 
+@register("MODE")
+@register("MODE.SNGL")
+def mode(c, args, sheet):
+    """The number that occurs most often; on a tie the one seen first (argument order, then row by row); #N/A when
+    no number repeats. Text, TRUE/FALSE and empty cells are skipped."""
+    if not args or not all(isinstance(a, RefNode) for a in args):
+        raise Unsupported("MODE of values typed into the formula not supported yet")
+    ranges = [_rng(c, a, sheet) for a in args]
+    rows = " UNION ALL ".join(
+        f"SELECT num, CAST({i} AS BIGINT) * 1099511627776 + CAST(row_num AS BIGINT) * 16384 + col_num AS pos "
+        f"FROM {CELLS} WHERE {r.where()} AND kind = 'n'" for i, r in enumerate(ranges))
+    counted = f"(SELECT num, COUNT(*) AS n, MIN(pos) AS first FROM ({rows}) mode_values GROUP BY num HAVING COUNT(*) > 1)"
+    found = f"(SELECT arg_max(num, (n, -first)) FROM {counted} mode_counts)"
+    return Expr(found, "num", errs(_errs(c, ranges, []), f"(CASE WHEN {found} IS NULL THEN '#N/A' END)"))
+
+
 @register("SUMPRODUCT")
 def sumproduct(c, args, sheet):
     if not args or not all(isinstance(a, RefNode) for a in args):

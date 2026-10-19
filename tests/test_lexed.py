@@ -10,6 +10,7 @@ TEMPLATES = [
     "'My Sheet'!A{r}+'a!b'!C{r}", "IF(A{r}>1E+5,\"A{r}\",B{r} & \" x \")", "a{r}+B{r}", "SUM(A:A)+A{r}",
     "{r}:{r}", "Rates*A{r}", "A{r} + 1.5E-3", "COUNTIF($E$1:$E$4,\">\"&A{r})", "A0{r}", "INDEX(A:A,{r})",
     "Table1[@Col]+A{r}", "-A{r}%", "SUM(A{r}:C{r})/3", "A{r}:A1048576", "((A{r}))",
+    'INDIRECT("A1")+A{r}', 'INDIRECT( "My Sheet!A1" , TRUE)*A{r}', 'INDIRECT("A"&{r})', 'INDIRECT("B2",FALSE)+A{r}',
 ]
 
 

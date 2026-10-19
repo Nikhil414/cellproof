@@ -79,6 +79,12 @@ def parse(formula: str) -> Node:
     return node
 
 
+def _fixed_reference(args) -> bool:
+    """INDIRECT of text written in the formula, A1 style (no second argument, or TRUE)."""
+    return (len(args) in (1, 2) and isinstance(args[0], Str) and args[0].value.strip() != ""
+            and (len(args) == 1 or (isinstance(args[1], Bool) and args[1].value)))
+
+
 def refs(node) -> Iterator[str]:
     """Every reference text in the tree, left to right."""
     if isinstance(node, RefNode):
@@ -167,6 +173,8 @@ class _Parser:
                 args.append(self.expr(0))
             tok = self.take()
             if tok.type == Token.FUNC and tok.subtype == Token.CLOSE:
+                if name == "INDIRECT" and _fixed_reference(args):  # INDIRECT("Sales") is just the range Sales
+                    return RefNode(args[0].value)
                 return Call(name, tuple(args))
             if not (tok.type == Token.SEP and tok.subtype == Token.ARG):
                 raise Unsupported(f"unexpected {tok.value!r} in {name}()")

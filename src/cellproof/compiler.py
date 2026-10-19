@@ -29,6 +29,7 @@ SEED_HEADER = ["sheet", "row_num", "col_num", "kind", "num", "txt"]
 READ_SEED = ("read_csv(?, header = true, quote = '\"', escape = '\"', columns = {'sheet': 'VARCHAR', "
              "'row_num': 'INTEGER', 'col_num': 'INTEGER', 'kind': 'VARCHAR', 'num': 'DOUBLE', 'txt': 'VARCHAR'})")
 VOLATILE = {"NOW", "TODAY", "RAND", "RANDBETWEEN", "OFFSET", "INDIRECT"}
+PASS_THROUGH = {"IF", "IFS", "IFERROR", "IFNA", "CHOOSE", "SWITCH"}  # can return a range given as an argument
 ARITH = {"+", "-", "*"}
 KIND = {"num": "n", "txt": "s", "bool": "b", "err": "e", "any": "a"}  # a: decided when the SQL runs
 TYPE = {"n": "num", "s": "txt", "b": "bool"}
@@ -108,11 +109,39 @@ class Compiler:
         self.findings: list[str] = []
         self.index = RangeIndex(book)
         self.rowrefs: dict[str, Expr] | None = None  # same-row placeholders of a region (see regions)
+        self.at: Key | None = None  # the formula cell being compiled in cell mode (implicit intersection)
+        self.ctx: list[str] = []  # what consumes the node being compiled: "op", "fn" or "pass" (PASS_THROUGH)
 
     def compile_cell(self, cell: Cell) -> Expr:
         if cell.array:
             raise Unsupported("array formula")
-        return finalize(self.expr(parse(cell.formula), cell.sheet))
+        self.at = cell.key
+        try:
+            return finalize(self.expr(parse(cell.formula), cell.sheet))
+        finally:
+            self.at = None
+
+    def _intersect(self, area, text: str) -> Expr:
+        """A range where one value is expected: Excel's implicit intersection takes the cell in the formula's own row
+        (a one-column range) or column (a one-row range), and is #VALUE! when there is none."""
+        if self.at is None or area.sheet != self.at[0] or (area.r1 != area.r2 and area.c1 != area.c2):
+            raise Unsupported(f"range {text} used as a single value")
+        # real Excel: in MAX(IF(c, A1:A9, 0)) IF hands MAX the whole range; only an operator, a function's own
+        # argument or the cell itself takes one value of it
+        for consumer in reversed(self.ctx):
+            if consumer == "op":
+                break
+            if consumer == "fn":
+                if self.ctx[-1] == "pass":
+                    raise Unsupported(f"range {text} passed through IF/CHOOSE into another function (Excel may use "
+                                      "the whole range there) not supported yet")
+                break
+        _, row, col = self.at
+        if area.c1 == area.c2 and area.r1 <= row <= area.r2:
+            return self.cell_value((area.sheet, row, area.c1))
+        if area.r1 == area.r2 and area.c1 <= col <= area.c2:
+            return self.cell_value((area.sheet, area.r1, col))
+        return error("#VALUE!")
 
     def expr(self, node, sheet: str) -> Expr:
         e = self._expr(node, sheet)
@@ -136,8 +165,17 @@ class Compiler:
                 return self.rowrefs[node.text]
             area = resolve(node.text, sheet, self.book)
             if not area.is_single:
-                raise Unsupported(f"range {node.text} used as a single value")
+                return self._intersect(area, node.text)
             return self.cell_value(area.key)
+        kind = "op" if isinstance(node, (Unary, Postfix, Binary)) else "pass" if (
+            isinstance(node, Call) and node.name in PASS_THROUGH) else "fn"
+        self.ctx.append(kind)
+        try:
+            return self._compound(node, sheet)
+        finally:
+            self.ctx.pop()
+
+    def _compound(self, node, sheet: str) -> Expr:
         if isinstance(node, Unary):
             x = num(self.expr(node.operand, sheet))
             return Expr(f"(-{x.sql})", "num", x.err)
