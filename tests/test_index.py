@@ -2,8 +2,8 @@ import time
 
 from xlsxkit import book_of
 
-from unexcel.compiler import compile_book
-from unexcel.refs import Area
+from cellproof.compiler import compile_book
+from cellproof.refs import Area
 
 
 def test_present_lists_only_filled_cells_row_major():

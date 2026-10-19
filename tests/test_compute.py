@@ -4,9 +4,9 @@ import sys
 import pytest
 from xlsxkit import SALES, write_xlsx
 
-from unexcel.cli import main
-from unexcel.compute import fill_missing
-from unexcel.reader import load
+from cellproof.cli import main
+from cellproof.compute import fill_missing
+from cellproof.reader import load
 
 
 def test_without_the_formulas_library_cells_stay_unresolved_with_a_hint(tmp_path, monkeypatch):
@@ -16,7 +16,7 @@ def test_without_the_formulas_library_cells_stay_unresolved_with_a_hint(tmp_path
     assert main(["convert", str(wb)]) == 0
     md = (tmp_path / "script_dbt" / "REPORT.md").read_text(encoding="utf-8")
     assert ("| S!A2 | no saved value in the file - open and save it in Excel "
-            "(or install unexcel[compute] to compute it) |") in md
+            "(or install cellproof[compute] to compute it) |") in md
 
 
 def test_sheet_names_with_apostrophes_are_not_computed(tmp_path):
@@ -56,7 +56,7 @@ def test_formulas_error_and_empty_tokens_are_not_text():  # both subclass str in
     from formulas.tokens.operand import XlError
     from schedula.utils.gen import Token
 
-    from unexcel.compute import _answer
+    from cellproof.compute import _answer
     assert _answer(XlError("#DIV/0!")) == ("#DIV/0!", "e")
     assert _answer(Token("empty")) == (None, "blank")
     assert _answer("text") == ("text", "s")

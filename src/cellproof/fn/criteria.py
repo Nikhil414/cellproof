@@ -8,11 +8,11 @@ the range's size.
 """
 from __future__ import annotations
 
-from unexcel.expr import CELLS, NO_ERR, Expr, errs, lit_str, parse_num, txt, where_area
-from unexcel.functions import arity, note_text_numbers, register
-from unexcel.model import Unsupported
-from unexcel.parser import RefNode
-from unexcel.refs import Area, resolve
+from cellproof.expr import CELLS, NO_ERR, Expr, errs, lit_str, parse_num, txt, where_area
+from cellproof.functions import arity, note_text_numbers, register
+from cellproof.model import Unsupported
+from cellproof.parser import RefNode
+from cellproof.refs import Area, resolve
 
 OPS = (">=", "<=", "<>", ">", "<", "=")
 

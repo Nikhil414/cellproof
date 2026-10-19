@@ -2,9 +2,9 @@ import random
 
 from xlsxkit import book_of
 
-from unexcel.graph import CYCLE, formula_order, order_with_groups
-from unexcel.parser import parse, refs
-from unexcel.refs import resolve
+from cellproof.graph import CYCLE, formula_order, order_with_groups
+from cellproof.parser import parse, refs
+from cellproof.refs import resolve
 
 
 def test_dependencies_come_first():
@@ -29,8 +29,8 @@ def test_unparseable_formula_is_still_ordered():
 
 import random
 
-from unexcel.parser import parse, refs
-from unexcel.refs import resolve
+from cellproof.parser import parse, refs
+from cellproof.refs import resolve
 
 
 def _old_unresolved(book):

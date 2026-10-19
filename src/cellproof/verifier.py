@@ -7,12 +7,12 @@ from pathlib import Path
 
 import duckdb
 
-from unexcel.compiler import READ_SEED, Compiled, batch_rows, write_seed
-from unexcel.model import Book, Cell, Key, Verdict, a1
+from cellproof.compiler import READ_SEED, Compiled, batch_rows, write_seed
+from cellproof.model import Book, Cell, Key, Verdict, a1
 
 
 class SqlFailed(Exception):
-    """DuckDB rejected SQL that unexcel generated (a bug: every supported formula must run)."""
+    """DuckDB rejected SQL that cellproof generated (a bug: every supported formula must run)."""
 
 
 def execute(book: Book, compiled: Compiled) -> dict[Key, tuple]:
@@ -28,7 +28,7 @@ def execute(book: Book, compiled: Compiled) -> dict[Key, tuple]:
         except duckdb.Error as err:
             # ponytail: the run stops; marking just this batch's cells (and their dependents) UNRESOLVED needs a recompile
             raise SqlFailed(f"DuckDB could not run the SQL for {a1(batch[0].key)} and {len(batch) - 1} cells after it "
-                            f"({str(err).splitlines()[0]}). This is a bug in unexcel; please report it.") from err
+                            f"({str(err).splitlines()[0]}). This is a bug in cellproof; please report it.") from err
     wanted = {s.key for s in compiled.steps}
     rows = con.execute("SELECT * FROM cells").fetchall()
     return {(s, r, c): (k, n, t) for s, r, c, k, n, t in rows if (s, r, c) in wanted}

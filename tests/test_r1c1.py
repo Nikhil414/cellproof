@@ -1,5 +1,5 @@
-from unexcel.parser import RefNode, parse, refs
-from unexcel.r1c1 import classify, map_refs, r1c1_key
+from cellproof.parser import RefNode, parse, refs
+from cellproof.r1c1 import classify, map_refs, r1c1_key
 
 
 def test_same_row_references():

@@ -4,9 +4,9 @@ import shutil
 import pytest
 from xlsxkit import book_of, write_xlsx
 
-from unexcel.cli import main
-from unexcel.compiler import compile_book
-from unexcel.verifier import execute
+from cellproof.cli import main
+from cellproof.compiler import compile_book
+from cellproof.verifier import execute
 
 
 def same(a, b):
@@ -90,7 +90,7 @@ def test_split_regions_build_in_dbt(tmp_path):
         spec[ref] = ("=" + cell.formula, saved[key][1]) if cell.formula else cell.value
     write_xlsx(wb, {"S": spec})
     assert main(["convert", str(wb), "--out", str(tmp_path / "out"), "--dbt"]) == 0  # no FAIL and dbt build ok
-    names = {p.name for p in (tmp_path / "out" / "models" / "unexcel_cells").iterdir()}
+    names = {p.name for p in (tmp_path / "out" / "models" / "cellproof_cells").iterdir()}
     assert sum(n.startswith("region_") for n in names) == 2
 
 

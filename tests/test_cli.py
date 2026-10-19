@@ -3,7 +3,7 @@ import sys
 
 from xlsxkit import SALES, write_xlsx
 
-from unexcel.cli import main
+from cellproof.cli import main
 
 COMMISSION = {
     "A1": "Rep", "B1": "Total", "C1": "Bonus",
@@ -77,14 +77,14 @@ def test_duplicate_model_names_are_unique_in_the_report_and_on_disk(tmp_path):
     write_xlsx(wb, {"My Sheet": _region_sheet(), "My_Sheet": _region_sheet()})
     assert main(["convert", str(wb), "--out", str(tmp_path / "out")]) == 0
     md = (tmp_path / "out" / "REPORT.md").read_text(encoding="utf-8")
-    models = {p.stem for p in (tmp_path / "out" / "models" / "unexcel_cells").glob("region_*.sql")}
+    models = {p.stem for p in (tmp_path / "out" / "models" / "cellproof_cells").glob("region_*.sql")}
     assert len(models) == 2
     for m in models:
         assert f"model {m}" in md
 
 
 def test_sql_that_duckdb_rejects_exits_3_with_the_cell(tmp_path, capsys, monkeypatch):
-    import unexcel.verifier as verifier
+    import cellproof.verifier as verifier
     wb = tmp_path / "b.xlsx"
     write_xlsx(wb, {"S": {"A1": 1, "B1": ("=A1+1", 2)}})
     monkeypatch.setattr(verifier, "batch_rows", lambda batch, prev: "SELECT no_such_column")

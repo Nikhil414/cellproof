@@ -4,11 +4,11 @@ The IS functions look at a value without failing: an error in their argument is 
 """
 from __future__ import annotations
 
-from unexcel.expr import NO_ERR, Expr, as_bool, compare, error, errs, pick, unify, unify_all
-from unexcel.functions import arity, register
-from unexcel.model import Unsupported
-from unexcel.parser import RefNode
-from unexcel.refs import resolve
+from cellproof.expr import NO_ERR, Expr, as_bool, compare, error, errs, pick, unify, unify_all
+from cellproof.functions import arity, register
+from cellproof.model import Unsupported
+from cellproof.parser import RefNode
+from cellproof.refs import resolve
 
 
 def _chain(branches: list[tuple[Expr, Expr]], default: Expr | None) -> Expr:

@@ -1,8 +1,8 @@
 import pytest
 from xlsxkit import book_of
 
-from unexcel.compiler import compile_book
-from unexcel.verifier import execute
+from cellproof.compiler import compile_book
+from cellproof.verifier import execute
 
 
 def run(sheets):

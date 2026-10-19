@@ -1,7 +1,7 @@
 """Writes examples/commission_unsaved.xlsx (formulas, no saved values).
 
 Open it in real Microsoft Excel, then File > Save As examples/commission.xlsx.
-Excel stores its own answers in the file; tests/test_excel_saved.py checks unexcel against them.
+Excel stores its own answers in the file; tests/test_excel_saved.py checks cellproof against them.
 """
 from pathlib import Path
 

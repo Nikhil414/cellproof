@@ -1,6 +1,6 @@
 """Write the compiled workbook as a dbt project (DuckDB profile included).
 
-The models run the SQL the verifier ran: seed input_cells -> unexcel_cells/cells_0001 -> ... Each batch model
+The models run the SQL the verifier ran: seed input_cells -> cellproof_cells/cells_0001 -> ... Each batch model
 holds only its own rows; a checkpoint model (cp_NNNN) unions everything every 64 batches and after the last
 batch, so no model reads more than ~65 sources. workbook_cells keeps the formula cells only.
 """
@@ -12,15 +12,15 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from unexcel.compiler import Compiled, Step, render_batch, write_seed
-from unexcel.expr import CELLS
-from unexcel.region import WIDE
-from unexcel.model import Book
+from cellproof.compiler import Compiled, Step, render_batch, write_seed
+from cellproof.expr import CELLS
+from cellproof.region import WIDE
+from cellproof.model import Book
 
 PROJECT = """name: {name}
 version: "1.0.0"
 config-version: 2
-profile: unexcel
+profile: cellproof
 flags:
   send_anonymous_usage_stats: false
 seeds:
@@ -37,12 +37,12 @@ models:
     +materialized: table
 """
 
-PROFILES = """unexcel:
+PROFILES = """cellproof:
   target: dev
   outputs:
     dev:
       type: duckdb
-      path: unexcel.duckdb
+      path: cellproof.duckdb
 """
 
 SCHEMA = """version: 2
@@ -117,7 +117,7 @@ def final_sql(last: str) -> str:
 
 def write_project(book: Book, compiled: Compiled, out: Path, stem: str) -> None:
     name = project_name(stem)
-    batches_dir = out / "models" / "unexcel_cells"
+    batches_dir = out / "models" / "cellproof_cells"
     (out / "seeds").mkdir(parents=True, exist_ok=True)
     batches_dir.mkdir(parents=True, exist_ok=True)
     for old in batches_dir.glob("*.sql"):  # a rerun must not leave batches or checkpoints from a bigger workbook
@@ -153,8 +153,8 @@ def run_dbt(out: Path) -> tuple[bool, str]:
     """End-to-end check: dbt seeds the inputs and builds the models on DuckDB."""
     exe = shutil.which("dbt")
     if exe is None:
-        return False, "dbt is not installed - run: pip install unexcel[dbt]"
-    env = {**os.environ, "DBT_SEND_ANONYMOUS_USAGE_STATS": "False"}  # dbt phones home by default; unexcel never does
+        return False, "dbt is not installed - run: pip install cellproof[dbt]"
+    env = {**os.environ, "DBT_SEND_ANONYMOUS_USAGE_STATS": "False"}  # dbt phones home by default; cellproof never does
     proc = subprocess.run([exe, "build", "--project-dir", str(out), "--profiles-dir", str(out)],
                           capture_output=True, text=True, cwd=out, env=env)
     return proc.returncode == 0, (proc.stdout + proc.stderr)[-4000:]

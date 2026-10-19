@@ -1,7 +1,7 @@
-"""Writes examples/errors_unsaved.xlsx: one cell per Excel error rule unexcel relies on.
+"""Writes examples/errors_unsaved.xlsx: one cell per Excel error rule cellproof relies on.
 
 Open it in real Microsoft Excel, then File > Save As examples/errors.xlsx.
-Excel stores its own answers in the file; tests/test_excel_saved.py checks unexcel against them.
+Excel stores its own answers in the file; tests/test_excel_saved.py checks cellproof against them.
 """
 from pathlib import Path
 

@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from unexcel.expr import BLANK, CELLS, NO_ERR, Expr, errs, lit_str, num, where_area
-from unexcel.functions import arity, note_text_numbers, register
-from unexcel.model import Unsupported
-from unexcel.parser import Num, RefNode
-from unexcel.refs import Area, resolve
+from cellproof.expr import BLANK, CELLS, NO_ERR, Expr, errs, lit_str, num, where_area
+from cellproof.functions import arity, note_text_numbers, register
+from cellproof.model import Unsupported
+from cellproof.parser import Num, RefNode
+from cellproof.refs import Area, resolve
 
 
 @dataclass(frozen=True)

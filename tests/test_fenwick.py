@@ -1,6 +1,6 @@
 import random
 
-from unexcel.fenwick import Fenwick
+from cellproof.fenwick import Fenwick
 
 
 def test_prefix_range_and_add_match_a_plain_list():

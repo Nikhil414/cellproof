@@ -5,9 +5,9 @@ import math
 from dataclasses import dataclass
 from typing import Literal
 
-from unexcel.model import Key, Unsupported
+from cellproof.model import Key, Unsupported
 
-CELLS = "__unexcel_cells__"  # every cell known before the current batch; replaced when SQL is rendered
+CELLS = "__cellproof_cells__"  # every cell known before the current batch; replaced when SQL is rendered
 NO_ERR = "NULL"  # the err of an expression that cannot fail
 Type = Literal["num", "txt", "bool", "blank", "err", "any"]
 

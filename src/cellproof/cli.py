@@ -1,23 +1,23 @@
-"""unexcel convert WORKBOOK [--out DIR] [--dbt]"""
+"""cellproof convert WORKBOOK [--out DIR] [--dbt]"""
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
 
-from unexcel.compiler import NO_VALUE, compile_book
-from unexcel.compute import fill_missing
-from unexcel.emitter import run_dbt, write_project
-from unexcel.reader import UnreadableWorkbook, load
-from unexcel.report import write_report
-from unexcel.verifier import SqlFailed, verify
+from cellproof.compiler import NO_VALUE, compile_book
+from cellproof.compute import fill_missing
+from cellproof.emitter import run_dbt, write_project
+from cellproof.reader import UnreadableWorkbook, load
+from cellproof.report import write_report
+from cellproof.verifier import SqlFailed, verify
 
 
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")  # Windows consoles can't print every character
-    parser = argparse.ArgumentParser(prog="unexcel", description="Turn an Excel workbook into a verified dbt project.")
+    parser = argparse.ArgumentParser(prog="cellproof", description="Turn an Excel workbook into a verified dbt project.")
     sub = parser.add_subparsers(dest="command", required=True)
     convert = sub.add_parser("convert", help="convert a workbook and verify every formula cell")
     convert.add_argument("workbook", type=Path)

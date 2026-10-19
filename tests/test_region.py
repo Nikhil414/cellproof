@@ -5,12 +5,12 @@ import duckdb
 import pytest
 from xlsxkit import book_of
 
-import unexcel.compiler as compiler
-from unexcel.compiler import READ_SEED, Compiler, compile_book, write_seed
-from unexcel.model import Unsupported
-from unexcel.region import compile_region, names_for, region_note
-from unexcel.regions import find_regions
-from unexcel.verifier import execute
+import cellproof.compiler as compiler
+from cellproof.compiler import READ_SEED, Compiler, compile_book, write_seed
+from cellproof.model import Unsupported
+from cellproof.region import compile_region, names_for, region_note
+from cellproof.regions import find_regions
+from cellproof.verifier import execute
 
 
 def small_book():
@@ -26,7 +26,7 @@ GOLDEN_WIDE = """WITH
 src AS (
   SELECT row_num,
     MAX(num) FILTER (WHERE col_num = 1) AS amount
-  FROM __unexcel_cells__ WHERE sheet = 'S' AND row_num BETWEEN 2 AND 4 AND col_num IN (1) GROUP BY row_num),
+  FROM __cellproof_cells__ WHERE sheet = 'S' AND row_num BETWEEN 2 AND 4 AND col_num IN (1) GROUP BY row_num),
 tax AS (
   SELECT *, (_.amount * CAST(1.1 AS DOUBLE)) AS tax
   FROM src AS _),
@@ -143,7 +143,7 @@ def test_header_names_fall_back_to_the_column_letter():  # Review Focus 5
         for c in "ABCDEF":
             spec[f"{c}{r}"] = float(r)
     book = book_of({"S": spec})
-    from unexcel.regions import Region
+    from cellproof.regions import Region
     fake = Region("S", 2, 5, [2], {}, {})  # only the row above (row 1) and the sheet matter for naming
     assert names_for(book, fake, [1, 2, 3, 4, 5, 6]) == {
         1: "col_a", 2: "col_b",  # duplicate header text
@@ -221,7 +221,7 @@ def test_headers_differing_only_in_case_both_fall_back():
         spec[f"B{r}"] = float(r)
         spec[f"C{r}"] = (f"=A{r}+B{r}", 0.0)
     book = book_of({"S": spec})
-    from unexcel.regions import Region
+    from cellproof.regions import Region
     fake = Region("S", 2, 5, [3], {}, {})
     assert names_for(book, fake, [1, 2]) == {1: "col_a", 2: "col_b"}
 
@@ -295,9 +295,9 @@ def test_a_dissolved_region_is_reported_and_values_are_unchanged():
 
 import shutil  # noqa: E402
 
-from unexcel.cli import main  # noqa: E402
+from cellproof.cli import main  # noqa: E402
 try:
-    from unexcel.region import WIDE, _validate  # noqa: E402
+    from cellproof.region import WIDE, _validate  # noqa: E402
 except ImportError:
     _validate = None
 from xlsxkit import write_xlsx  # noqa: E402
@@ -348,7 +348,7 @@ def test_a_lookup_column_in_a_region_never_crashes_and_equals_cell_mode(col):
 
 
 def test_a_column_duckdb_cannot_plan_is_rejected_with_its_reason_and_its_sibling_is_kept(monkeypatch):
-    import unexcel.region as region_mod
+    import cellproof.region as region_mod
     real = region_mod._validate  # no known formula fails to plan any more: make column J's SQL fail
     monkeypatch.setattr(region_mod, "_validate", lambda wide, rows: "Binder Error: boom" if " AS col_j" in wide
                         else real(wide, rows))

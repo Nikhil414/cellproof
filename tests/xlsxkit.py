@@ -7,8 +7,8 @@ from xml.sax.saxutils import escape
 
 from openpyxl.utils.cell import coordinate_to_tuple
 
-from unexcel.model import Book, Cell
-from unexcel.reader import ERRORS
+from cellproof.model import Book, Cell
+from cellproof.reader import ERRORS
 
 MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"

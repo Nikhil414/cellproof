@@ -6,7 +6,7 @@ from typing import Iterator, Union
 
 from openpyxl.formula.tokenizer import Token, Tokenizer, TokenizerError
 
-from unexcel.model import Unsupported
+from cellproof.model import Unsupported
 
 
 @dataclass(frozen=True)

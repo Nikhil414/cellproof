@@ -13,13 +13,13 @@ from functools import lru_cache
 import duckdb
 from openpyxl.utils.cell import get_column_letter
 
-from unexcel.compiler import DEEP, INPUT_COLUMNS, Compiler, Step, a1, cell_row
-from unexcel.expr import CELLS, NO_ERR, Expr, any_of, errs, finalize, lit_str, num
-from unexcel.functions import note_text_numbers, range_sum
-from unexcel.model import Book, Unsupported
-from unexcel.r1c1 import ROWREF, RUNREF
-from unexcel.refs import Area
-from unexcel.regions import Region, column_order
+from cellproof.compiler import DEEP, INPUT_COLUMNS, Compiler, Step, a1, cell_row
+from cellproof.expr import CELLS, NO_ERR, Expr, any_of, errs, finalize, lit_str, num
+from cellproof.functions import note_text_numbers, range_sum
+from cellproof.model import Book, Unsupported
+from cellproof.r1c1 import ROWREF, RUNREF
+from cellproof.refs import Area
+from cellproof.regions import Region, column_order
 
 # every row from the region's first row to this one (rows are unique and contiguous)
 UPTO = "OVER (ORDER BY _.row_num ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)"

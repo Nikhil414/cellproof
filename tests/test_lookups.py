@@ -1,7 +1,7 @@
 from xlsxkit import book_of
 
-from unexcel.compiler import compile_book
-from unexcel.verifier import execute
+from cellproof.compiler import compile_book
+from cellproof.verifier import execute
 
 # Rates: brackets sorted ascending (A), rate (B), label (C, one blank)
 DATA = {"A1": 0, "B1": 0.1, "C1": "low", "A2": 1000, "B2": 0.2, "C2": "mid", "A3": 5000, "B3": 0.3,
@@ -23,7 +23,7 @@ def test_approximate_lookups_find_the_bracket():
     got, c = run({"A1": ("=VLOOKUP(2500, R!A1:B3, 2)", 0.2), "A2": ("=VLOOKUP(2500, R!A1:B3, 2, TRUE)", 0.2),
                   "A3": ("=MATCH(5000, R!A1:A3)", 3), "A4": ("=MATCH(-1, R!A1:A3, 1)", "#N/A"),
                   "A5": ("=MATCH(999, R!A1:A3, -1)", "#N/A"), "A6": ("=MATCH(999, R!I1:I3, -1)", 2)})
-    # Real Excel: -1 assumes descending data, so on the ascending A1:A3 it answers #N/A. unexcel will not guess
+    # Real Excel: -1 assumes descending data, so on the ascending A1:A3 it answers #N/A. cellproof will not guess
     # what a binary search does on data out of order (A5); on descending data (I1:I3) it finds the bracket (A6).
     assert list(c.unresolved) == [("F", 5, 1)] and "descending sorted" in c.unresolved[("F", 5, 1)]
     assert [got[("F", r, 1)] for r in (1, 2, 3, 4, 6)] == [N(0.2), N(0.2), N(3), ("e", None, "#N/A"), N(2)]

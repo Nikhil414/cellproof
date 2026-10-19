@@ -9,7 +9,7 @@ import openpyxl
 from openpyxl.utils.datetime import CALENDAR_MAC_1904, to_excel
 from openpyxl.worksheet.formula import ArrayFormula
 
-from unexcel.model import Book, Cell, Kind, Value
+from cellproof.model import Book, Cell, Kind, Value
 
 ERRORS = {"#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A"}
 SUPPORTED = {".xlsx", ".xlsm"}

@@ -4,9 +4,9 @@ import shutil
 import pytest
 from xlsxkit import book_of, write_xlsx
 
-from unexcel.cli import main
-from unexcel.compiler import compile_book
-from unexcel.verifier import execute
+from cellproof.cli import main
+from cellproof.compiler import compile_book
+from cellproof.verifier import execute
 
 N = 8  # rows 2..N+1
 PLAIN = lambda r: f"=A{r}*1.5"  # noqa: E731
@@ -161,7 +161,7 @@ def ledger(rows):
 
 
 def test_a_balance_that_cancels_to_zero_stays_in_excels_order():
-    from unexcel.verifier import verify
+    from cellproof.verifier import verify
     book = ledger(1000)
     compiled = compile_book(book)
     assert not in_region(compiled, 3) and not in_region(compiled, 4)
@@ -170,7 +170,7 @@ def test_a_balance_that_cancels_to_zero_stays_in_excels_order():
 
 
 def test_a_one_sign_running_total_with_saved_values_stays_a_window():
-    from unexcel.verifier import verify
+    from cellproof.verifier import verify
     spec = {"C1": 0.0}
     for r in range(2, 2002):
         spec[f"B{r}"] = ((r * 7919) % 100001) / 100.0

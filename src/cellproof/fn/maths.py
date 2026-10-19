@@ -7,9 +7,9 @@ Excel does, so ROUNDUP(0.1*3, 1) is 0.3, not 0.4.
 """
 from __future__ import annotations
 
-from unexcel.expr import ZERO, Expr, errs, num
-from unexcel.functions import arity, register
-from unexcel.parser import Binary
+from cellproof.expr import ZERO, Expr, errs, num
+from cellproof.functions import arity, register
+from cellproof.parser import Binary
 
 
 def _guarded(value: str, bad: str, code: str) -> tuple[str, str]:

@@ -1,7 +1,7 @@
 """Writes examples/functions_unsaved.xlsx: the Excel behaviours Plan 2b could not confirm without Excel.
 
 Open it in real Microsoft Excel (Windows or Mac), then File > Save As examples/functions.xlsx.
-tests/test_excel_saved.py then checks unexcel's answers against Excel's own.
+tests/test_excel_saved.py then checks cellproof's answers against Excel's own.
 """
 from pathlib import Path
 
@@ -89,7 +89,7 @@ CHECKS = {  # the open question each one answers
     "G70": '=DATE(1900,2,30)',
     "G71": '=DATE(1900,3,0)',
     "G72": '=TEXT(-0.0004,"0.0%")',
-    # Approximate match on unsorted data: unexcel does not guess, these record what Excel's binary search answers
+    # Approximate match on unsorted data: cellproof does not guess, these record what Excel's binary search answers
     "G73": '=MATCH(15,E1:E3,-1)',
     "G74": '=MATCH(25,E1:E3,1)',
 }

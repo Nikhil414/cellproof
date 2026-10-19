@@ -14,15 +14,15 @@ from dataclasses import dataclass
 from dataclasses import field as dc_field
 from pathlib import Path
 
-import unexcel.fn  # noqa: F401  (registers the function library)
-from unexcel.expr import (BLANK, CELLS, NO_ERR, Expr, any_of, compare, error, errs, finalize, lit_num, lit_str, num,
+import cellproof.fn  # noqa: F401  (registers the function library)
+from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, any_of, compare, error, errs, finalize, lit_num, lit_str, num,
                           txt, where_cell)
-from unexcel.functions import FUNCS
-from unexcel.graph import formula_order
-from unexcel.model import Book, Cell, Key, Unsupported, a1
-from unexcel.parser import Binary, Bool, Call, ErrLit, Num, Postfix, RefNode, Str, Unary, parse
-from unexcel.rangeindex import RangeIndex, field
-from unexcel.refs import Area, resolve
+from cellproof.functions import FUNCS
+from cellproof.graph import formula_order
+from cellproof.model import Book, Cell, Key, Unsupported, a1
+from cellproof.parser import Binary, Bool, Call, ErrLit, Num, Postfix, RefNode, Str, Unary, parse
+from cellproof.rangeindex import RangeIndex, field
+from cellproof.refs import Area, resolve
 
 INPUT_COLUMNS = "sheet VARCHAR, row_num INTEGER, col_num INTEGER, kind VARCHAR, num DOUBLE, txt VARCHAR"
 SEED_HEADER = ["sheet", "row_num", "col_num", "kind", "num", "txt"]
@@ -258,8 +258,8 @@ def _close(comp: Compiler, batches: list[list[Step]], current: list[Step]) -> No
 def compile_book(book: Book, regions: bool = True) -> Compiled:
     from openpyxl.utils import get_column_letter
 
-    from unexcel.region import compile_region, region_note
-    from unexcel.regions import RegionScan, column_order, find_regions, order_with_regions
+    from cellproof.region import compile_region, region_note
+    from cellproof.regions import RegionScan, column_order, find_regions, order_with_regions
 
     scan = find_regions(book) if regions else RegionScan([], [])
     order, unresolved, kept = order_with_regions(book, scan.regions)

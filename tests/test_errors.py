@@ -1,8 +1,8 @@
 from xlsxkit import book_of
 
-from unexcel.compiler import compile_book
-from unexcel.model import Cell
-from unexcel.verifier import execute, matches
+from cellproof.compiler import compile_book
+from cellproof.model import Cell
+from cellproof.verifier import execute, matches
 
 
 def run(sheets):

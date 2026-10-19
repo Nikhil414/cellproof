@@ -1,14 +1,16 @@
-# unexcel
+# cellproof
 
 **Turn an Excel workbook into SQL, and prove every number matches.**
 
+(Released as `unexcel` up to 0.1.0; renamed to cellproof in 0.2.0.)
+
 Business logic often lives in a spreadsheet that one person understands. Moving it into a database is risky because
-nobody can show the new numbers equal the old ones. unexcel translates every formula of an `.xlsx` into SQL, runs that
+nobody can show the new numbers equal the old ones. cellproof translates every formula of an `.xlsx` into SQL, runs that
 SQL on [DuckDB](https://duckdb.org), and compares each result with the value Excel itself saved in the file. Excel's
 saved values are a free answer key.
 
 ```
-$ unexcel convert examples/functions.xlsx
+$ cellproof convert examples/functions.xlsx
 72 pass, 0 fail, 4 unresolved -> examples/functions_dbt/REPORT.md
 ```
 
@@ -18,19 +20,19 @@ Every formula cell gets one verdict:
 |---|---|
 | **PASS** | the SQL gives the value Excel saved |
 | **FAIL** | the SQL gives a different value; the report shows both |
-| **UNRESOLVED** | unexcel could not translate the formula exactly; the report says why. It never guesses. |
+| **UNRESOLVED** | cellproof could not translate the formula exactly; the report says why. It never guesses. |
 
 Exit code: `0` no FAIL, `1` at least one FAIL (or `dbt build` failed), `2` the workbook could not be read, `3`
-DuckDB rejected SQL that unexcel generated (a bug in unexcel; the message names the cell, please report it).
+DuckDB rejected SQL that cellproof generated (a bug in cellproof; the message names the cell, please report it).
 
 ## Install
 
 Python 3.10 or newer.
 
 ```bash
-pip install unexcel
-pip install "unexcel[dbt]"      # also run dbt build (--dbt)
-pip install "unexcel[compute]"  # answer key for files never saved in Excel
+pip install cellproof
+pip install "cellproof[dbt]"      # also run dbt build (--dbt)
+pip install "cellproof[compute]"  # answer key for files never saved in Excel
 ```
 
 Runtime dependencies are only `openpyxl` and `duckdb`.
@@ -38,9 +40,9 @@ Runtime dependencies are only `openpyxl` and `duckdb`.
 ## Use
 
 ```bash
-unexcel convert book.xlsx                 # writes book_dbt/ next to the file
-unexcel convert book.xlsx --out out_dir   # choose the folder
-unexcel convert book.xlsx --dbt           # also run `dbt build` on the generated project
+cellproof convert book.xlsx                 # writes book_dbt/ next to the file
+cellproof convert book.xlsx --out out_dir   # choose the folder
+cellproof convert book.xlsx --dbt           # also run `dbt build` on the generated project
 ```
 
 The output folder holds:
@@ -82,11 +84,12 @@ PROPER, REPLACE, REPT, RIGHT, ROUND(UP/DOWN), SEARCH, SIGN, SQRT, SUBSTITUTE, SU
 SWITCH, TEXT, TEXTJOIN, TRIM, TRUE/FALSE, TRUNC, UPPER, VALUE, VLOOKUP, WEEKDAY, XLOOKUP, XOR, YEAR.
 
 **Speed** (Windows 11 laptop, measured): a 200,000-formula workbook (four formula columns over 50,000 rows, one of them
-a running total) converts and verifies in 31 s, all PASS.
+a running total) converts and verifies in 26 s, all PASS. 50,000 rows of VLOOKUP into a 1,000-row table: 4.6 s.
+COUNTIFS/SUMIFS with a criterion from the row run at the same speed.
 
 ## Limitations
 
-unexcel prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each reported with a reason:
+cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each reported with a reason:
 
 - **File formats:** `.xlsx` and `.xlsm` only (no `.xls`, `.xlsb`, `.ods`). Macros (VBA) are ignored.
 - **Not supported:** array formulas and dynamic arrays, volatile functions (`NOW`, `TODAY`, `RAND`, `OFFSET`,
@@ -95,28 +98,28 @@ unexcel prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each repo
 - **Approximate lookups on unsorted data** (MATCH/VLOOKUP/HLOOKUP with match type 1/-1): UNRESOLVED, because Excel's
   answer then depends on its binary search.
 - **Text to number:** only plain numbers convert (`"3"`, `" -1.5e3 "`). Excel also reads `"1,000"`, `"$5"`, `"50%"`;
-  unexcel gives `#VALUE!`, which shows as a FAIL.
+  cellproof gives `#VALUE!`, which shows as a FAIL.
 - **Some function options:** SUBTOTAL 101-111 (hidden rows), DATEDIF units MD/YM/YD, WEEKDAY types 11-17, TEXT formats
   outside the supported table, COUNT or MEDIAN of values typed into the formula, criteria taken from an empty cell.
 - **Floating point:** a running total becomes a fast window function only when Excel's saved values prove the different
   addition order cannot matter; balances that cancel back to zero (ledgers) are added in Excel's order instead, which
   is slower. Elsewhere SQL can still differ from Excel in the last digits, which would show as an honest FAIL. A
   number that overflows becomes `inf` instead of `#NUM!`.
-- **Speed:** regions cover columns that repeat one formula over the same rows. Lookups in every row (VLOOKUP, INDEX/MATCH)
-  still run cell by cell and are slower (about 6 s per 1,000 lookups). Running totals other than plain sums
-  (`=C1*1.05+B2`, `=MAX(C1,B2)`) also run cell by cell.
+- **Speed:** regions cover columns that repeat one formula over the same rows, lookups and *IF(S) criteria included.
+  A formula that is not part of such a column runs cell by cell (a lookup alone: about 7 s per 1,000). Running totals
+  other than plain sums (`=C1*1.05+B2`, `=MAX(C1,B2)`) also run cell by cell.
 - **The answer key:** a workbook must have been saved by Excel; `formulas` (the `compute` extra) is a weaker fallback
   and is known to disagree with Excel in places.
 - **dbt:** the generated project targets DuckDB (`dbt-duckdb`). Other warehouses are not generated yet.
 
 ## Security and privacy
 
-- **No network.** unexcel never sends workbook data anywhere; everything runs locally in DuckDB.
+- **No network.** cellproof never sends workbook data anywhere; everything runs locally in DuckDB.
 - **Untrusted files:** workbook text only ever reaches SQL as escaped string literals; headers become SQL names only
   after being reduced to `[a-z0-9_]`; braces are escaped so dbt's Jinja cannot run workbook text. A file that unzips to
   more than 2 GB is refused. For extra XML hardening on untrusted files, `pip install defusedxml` (openpyxl then uses it
   automatically).
-- **Output folder:** a rerun deletes the old `*.sql` files in `<out>/models/unexcel_cells/` so stale models cannot
+- **Output folder:** a rerun deletes the old `*.sql` files in `<out>/models/cellproof_cells/` so stale models cannot
   linger; point `--out` at a folder of its own.
 - **`--dbt`** runs your installed `dbt` on the generated project (no shell).
 
@@ -128,7 +131,7 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e ".[dev,dbt,compute]"
 python -m pytest tests -q                          # ~8 min with dbt on PATH
-UNEXCEL_PERF=1 python -m pytest tests/test_perf.py -s   # the 200k-formula benchmark
+CELLPROOF_PERF=1 python -m pytest tests/test_perf.py -s   # the 200k-formula benchmark
 ```
 
 Rules the code follows: never guess a value (anything not translated exactly is UNRESOLVED with a reason a user

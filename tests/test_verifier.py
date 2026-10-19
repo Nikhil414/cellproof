@@ -1,8 +1,8 @@
 from xlsxkit import book_of
 
-from unexcel.compiler import compile_book
-from unexcel.model import Cell, Verdict
-from unexcel.verifier import matches, verify
+from cellproof.compiler import compile_book
+from cellproof.model import Cell, Verdict
+from cellproof.verifier import matches, verify
 
 
 def test_pass_fail_and_unresolved():

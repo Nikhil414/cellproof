@@ -6,12 +6,12 @@ Excel stores a date as a serial number: 1 = 1900-01-01, and it counts a 29 Febru
 """
 from __future__ import annotations
 
-from unexcel.expr import Expr, errs, num
-from unexcel.fn.lookup import int_literal
-from unexcel.fn.text import FORMATS
-from unexcel.functions import arity, register
-from unexcel.model import Unsupported
-from unexcel.parser import Bool, Str
+from cellproof.expr import Expr, errs, num
+from cellproof.fn.lookup import int_literal
+from cellproof.fn.text import FORMATS
+from cellproof.functions import arity, register
+from cellproof.model import Unsupported
+from cellproof.parser import Bool, Str
 
 MAX_SERIAL = 2958465  # 9999-12-31
 

@@ -10,8 +10,8 @@ from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from dataclasses import dataclass
 
-from unexcel.fenwick import Fenwick
-from unexcel.model import Book, Key
+from cellproof.fenwick import Fenwick
+from cellproof.model import Book, Key
 
 FIELDS = ("n", "s", "b", "e", "a", "blank", "merr", "fdone")
 BITS = 40  # summary() adds counters across columns: 1,048,576 rows x 16,384 columns = 2**34 < 2**40, no carry

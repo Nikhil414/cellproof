@@ -1,7 +1,7 @@
 from xlsxkit import book_of
 
-from unexcel.compiler import compile_book
-from unexcel.verifier import execute
+from cellproof.compiler import compile_book
+from cellproof.verifier import execute
 
 DATA = {"A1": 4, "A2": "x", "A3": True, "A4": 8, "A5": "15,000", "B1": 2, "B2": 3, "B3": "", "C1": "#N/A"}
 

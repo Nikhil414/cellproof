@@ -11,10 +11,10 @@ from dataclasses import dataclass, field
 
 from openpyxl.utils.cell import get_column_letter
 
-from unexcel.model import Book, Key, Unsupported
-from unexcel.parser import Binary, Call, RefNode, Unary, Postfix, parse, refs
-from unexcel.r1c1 import ROWREF, RUNREF, classify, growing, lexed, map_refs, prev_self
-from unexcel.refs import resolve
+from cellproof.model import Book, Key, Unsupported
+from cellproof.parser import Binary, Call, RefNode, Unary, Postfix, parse, refs
+from cellproof.r1c1 import ROWREF, RUNREF, classify, growing, lexed, map_refs, prev_self
+from cellproof.refs import resolve
 
 MIN_ROWS = 3
 
@@ -92,7 +92,7 @@ def find_regions(book: Book) -> RegionScan:
             try:
                 parsed = parse(cell.formula)
                 if any(t.upper().startswith(("__ROWREF_", "__RUN_")) for t in refs(parsed)):
-                    raise Unsupported("uses a name spelled like unexcel's own placeholders")
+                    raise Unsupported("uses a name spelled like cellproof's own placeholders")
                 ast, rec = _running(parsed, r1, col)
                 sums: list = []
                 ast = _map_sums(ast, r1, col, sums)
@@ -227,7 +227,7 @@ def order_with_regions(book: Book, regions: list[Region]):
     A region that cannot be ordered as one block (a cell between its columns: a running total, a total that a share
     column divides by) is split once into its pure columns and the rest; the rest stays a block if it can, else it
     goes back to cell mode. The pure part never cycles, so splitting only ever adds coverage."""
-    from unexcel.graph import order_with_groups
+    from cellproof.graph import order_with_groups
 
     pending, split = list(regions), set()  # split: ids of pieces made by a split, never split again
     while True:

@@ -1,8 +1,8 @@
 import pytest
 from xlsxkit import book_of
 
-from unexcel.compiler import compile_book
-from unexcel.verifier import execute
+from cellproof.compiler import compile_book
+from cellproof.verifier import execute
 
 
 def run(sheets, names=None):
@@ -62,9 +62,9 @@ def test_workbook_without_formulas_gives_empty_result():
     assert got == {} and bad == {}
 
 
-from unexcel.compiler import Compiler, NewBatch  # noqa: E402
-from unexcel.model import Unsupported  # noqa: E402
-from unexcel.refs import Area  # noqa: E402
+from cellproof.compiler import Compiler, NewBatch  # noqa: E402
+from cellproof.model import Unsupported  # noqa: E402
+from cellproof.refs import Area  # noqa: E402
 
 
 def test_ready_reports_open_unresolved_and_done_cells():  # Review Focus 4
@@ -90,9 +90,9 @@ def test_keys_of_an_empty_range():
     assert len(keys) == 0 and keys.kinds == frozenset() and not keys.may_err
 
 
-from unexcel.compiler import cell_row  # noqa: E402
-from unexcel.expr import Expr  # noqa: E402
-from unexcel.parser import Binary, Num, RefNode  # noqa: E402
+from cellproof.compiler import cell_row  # noqa: E402
+from cellproof.expr import Expr  # noqa: E402
+from cellproof.parser import Binary, Num, RefNode  # noqa: E402
 
 
 def test_cell_row_drops_the_error_cases_when_the_cell_cannot_fail():
@@ -114,7 +114,7 @@ def test_rowrefs_compile_placeholders_to_the_given_expressions():
 
 
 def test_a_number_beyond_excels_range_is_unresolved_not_a_crash():
-    from unexcel.verifier import verify
+    from cellproof.verifier import verify
     book = book_of({"S": {"A1": 2.0, "B1": ("=1E+400*A1", "#NUM!"), "C1": ("=A1+1", 3.0)}})
     compiled = compile_book(book)
     assert "beyond Excel's range" in compiled.unresolved[("S", 1, 2)]

@@ -6,8 +6,8 @@ import re
 from openpyxl.formula.tokenizer import Token, Tokenizer, TokenizerError
 from openpyxl.utils.cell import column_index_from_string
 
-from unexcel.model import Unsupported
-from unexcel.parser import Binary, Call, Postfix, RefNode, Unary, parse
+from cellproof.model import Unsupported
+from cellproof.parser import Binary, Call, Postfix, RefNode, Unary, parse
 
 CELL = re.compile(r"^(\$?)([A-Za-z]{1,3})(\$?)([0-9]+)$")
 ROW_ONLY = re.compile(r"^\$?[0-9]+$")

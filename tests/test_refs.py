@@ -1,7 +1,7 @@
 import pytest
 
-from unexcel.model import Book, Unsupported
-from unexcel.refs import Area, resolve
+from cellproof.model import Book, Unsupported
+from cellproof.refs import Area, resolve
 
 BOOK = Book(cells={}, sheets=["S", "My Sheet", "Bob's"], names={"RATE": ("My Sheet", "B2")},
             max_row={"S": 10, "My Sheet": 5, "Bob's": 1})

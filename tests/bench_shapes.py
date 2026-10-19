@@ -12,10 +12,10 @@ from pathlib import Path
 
 from xlsxkit import write_xlsx
 
-import unexcel.compiler as compiler
-from unexcel.emitter import run_dbt, write_project
-from unexcel.reader import load
-from unexcel.verifier import verify
+import cellproof.compiler as compiler
+from cellproof.emitter import run_dbt, write_project
+from cellproof.reader import load
+from cellproof.verifier import verify
 
 
 def make(shape: str, n: int) -> dict:
@@ -81,7 +81,7 @@ def main() -> None:
         t4 = time.perf_counter()
         write_project(book, compiled, out, "bench")
         ok, _ = run_dbt(out)
-        db = out / "unexcel.duckdb"
+        db = out / "cellproof.duckdb"
         line += f" dbt_ok={ok} dbt={time.perf_counter() - t4:.1f}s db_mb={db.stat().st_size / 1e6:.1f}"
     print(line, flush=True)
 

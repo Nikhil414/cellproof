@@ -1,7 +1,7 @@
 from xlsxkit import book_of
 
-from unexcel.compiler import compile_book
-from unexcel.verifier import verify
+from cellproof.compiler import compile_book
+from cellproof.verifier import verify
 
 
 def _running_formula(n):

@@ -2,8 +2,8 @@ import random
 
 from xlsxkit import book_of
 
-from unexcel.compiler import compile_book
-from unexcel.verifier import execute
+from cellproof.compiler import compile_book
+from cellproof.verifier import execute
 
 TEMPLATES = [
     "={a}{r}*1.1", "=IF({x}{r}>10,{x}{r},0)", "={x}{r}-{y}{r}", "={a}{r}/{b}{r}", '={c}{r}&"!"',

@@ -6,10 +6,10 @@ import pytest
 from openpyxl.styles import Font
 from xlsxkit import write_xlsx
 
-from unexcel.model import Cell
-from unexcel.reader import UnreadableWorkbook, load
-from unexcel.compiler import NO_VALUE, compile_book
-from unexcel.verifier import verify
+from cellproof.model import Cell
+from cellproof.reader import UnreadableWorkbook, load
+from cellproof.compiler import NO_VALUE, compile_book
+from cellproof.verifier import verify
 
 
 def test_saved_empty_string_is_distinct_from_missing_answer(tmp_path):
@@ -82,7 +82,7 @@ def test_rejects_corrupt_file(tmp_path):
 
 
 def test_rejects_a_file_that_unzips_too_large(tmp_path, monkeypatch):
-    import unexcel.reader as reader
+    import cellproof.reader as reader
     p = tmp_path / "big.xlsx"
     write_xlsx(p, {"S": {"A1": "x" * 5000}})
     monkeypatch.setattr(reader, "MAX_UNZIPPED", 1000)

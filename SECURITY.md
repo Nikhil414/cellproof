@@ -6,9 +6,9 @@ Please do not open a public issue. Use GitHub's private reporting: the repositor
 **Report a vulnerability**. Include a minimal workbook or steps that reproduce it. You will get an answer within a
 week.
 
-## What unexcel promises
+## What cellproof promises
 
-unexcel is meant to run on workbooks you did not write. It aims to guarantee:
+cellproof is meant to run on workbooks you did not write. It aims to guarantee:
 
 - **No network access** with workbook data. Conversion runs locally on DuckDB. The generated dbt project turns off
   dbt's anonymous usage statistics, and `--dbt` runs dbt with them off too.
@@ -28,6 +28,6 @@ unexcel is meant to run on workbooks you did not write. It aims to guarantee:
 - **The `compute` extra** uses the third-party `formulas` library to calculate expected values. It does not execute
   workbook text as Python, but it is a larger code surface; leave it uninstalled for untrusted files if you do not need
   it.
-- **`--out`**: a rerun deletes old `*.sql` files in `<out>/models/unexcel_cells/`. Give each conversion its own folder.
+- **`--out`**: a rerun deletes old `*.sql` files in `<out>/models/cellproof_cells/`. Give each conversion its own folder.
 - **The generated CSV seed** (`seeds/input_cells.csv`) holds the workbook's text as data. Opening it in a spreadsheet
   program may interpret text starting with `=` as a formula, as with any CSV.

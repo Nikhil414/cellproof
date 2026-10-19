@@ -15,10 +15,10 @@ import heapq
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
 
-from unexcel.fenwick import Fenwick
-from unexcel.model import Book, Key, Unsupported
-from unexcel.r1c1 import lexed
-from unexcel.refs import resolve
+from cellproof.fenwick import Fenwick
+from cellproof.model import Book, Key, Unsupported
+from cellproof.r1c1 import lexed
+from cellproof.refs import resolve
 
 CYCLE = "circular reference (or depends on one)"
 

@@ -10,12 +10,12 @@ LEFT JOIN on the row's values cannot be planned at all.
 """
 from __future__ import annotations
 
-from unexcel.expr import CELLS, NO_ERR, Expr, any_of, errs, lit_str, num, unify_all, where_area
-from unexcel.fn.criteria import like_pattern
-from unexcel.functions import arity, register
-from unexcel.model import Unsupported
-from unexcel.parser import Bool, Num, RefNode, Str, Unary
-from unexcel.refs import Area, resolve
+from cellproof.expr import CELLS, NO_ERR, Expr, any_of, errs, lit_str, num, unify_all, where_area
+from cellproof.fn.criteria import like_pattern
+from cellproof.functions import arity, register
+from cellproof.model import Unsupported
+from cellproof.parser import Bool, Num, RefNode, Str, Unary
+from cellproof.refs import Area, resolve
 
 
 def _area(c, node, sheet: str, fname: str) -> tuple[Area, object]:
@@ -87,7 +87,7 @@ def _near(k: str, x: Expr, cmp: str) -> tuple[str, str]:
 
 def _require_sorted(c, line: Area, descending: bool, fname: str) -> None:
     """Excel's approximate match is a binary search. On data that is not in order its answer depends on the search
-    path (real Excel: MATCH(150, {0,100,500}, -1) is #N/A although 500 >= 150), so unexcel refuses to guess.
+    path (real Excel: MATCH(150, {0,100,500}, -1) is #N/A although 500 >= 150), so cellproof refuses to guess.
     The order is judged from the saved values, which the verifier then holds the computed values to."""
     seen = []
     for key in line.cells():

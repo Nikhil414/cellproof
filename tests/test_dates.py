@@ -1,7 +1,7 @@
 from xlsxkit import book_of
 
-from unexcel.compiler import compile_book
-from unexcel.verifier import execute
+from cellproof.compiler import compile_book
+from cellproof.verifier import execute
 
 CASES = [  # formula, Excel's answer (serial numbers: 46023 = 2026-01-01)
     ("=DATE(2026, 1, 1)", 46023), ("=DATE(2026, 14, 31)", 46449), ("=DATE(26, 1, 1)", 9498), ("=DATE(2026, 2, 29)", 46082),

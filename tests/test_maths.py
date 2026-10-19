@@ -2,8 +2,8 @@ import math
 
 from xlsxkit import book_of
 
-from unexcel.compiler import compile_book
-from unexcel.verifier import execute
+from cellproof.compiler import compile_book
+from cellproof.verifier import execute
 
 CASES = [  # formula, Excel's answer (from Microsoft's function reference)
     ("=ABS(-2.5)", 2.5), ("=INT(-2.5)", -3), ("=SIGN(-0.1)", -1), ("=PI()", math.pi), ("=SQRT(16)", 4),

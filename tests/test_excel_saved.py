@@ -2,10 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from unexcel.compiler import compile_book
-from unexcel.model import a1
-from unexcel.reader import load
-from unexcel.verifier import verify
+from cellproof.compiler import compile_book
+from cellproof.model import a1
+from cellproof.reader import load
+from cellproof.verifier import verify
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "commission.xlsx"
 
@@ -50,7 +50,7 @@ def test_real_excel_function_answers_match():
                     "run examples/make_functions.py, open the result in Excel and Save As examples/functions.xlsx")
     book = load(FUNCTIONS_EXAMPLE)
     verdicts = verify(book, compile_book(book))
-    # UNRESOLVED is allowed only where unexcel refuses to guess what Excel's binary search does on unsorted data.
+    # UNRESOLVED is allowed only where cellproof refuses to guess what Excel's binary search does on unsorted data.
     failures = [v for v in verdicts
                 if v.status != "PASS" and not (v.status == "UNRESOLVED" and "sorted data" in v.reason)]
     assert not failures, "\n".join(

@@ -6,7 +6,7 @@ from typing import Iterator
 
 from openpyxl.utils.cell import range_boundaries
 
-from unexcel.model import Book, Key, Unsupported
+from cellproof.model import Book, Key, Unsupported
 
 MAX_ROW = 1_048_576
 

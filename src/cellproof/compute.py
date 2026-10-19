@@ -1,6 +1,6 @@
 """Answer key for formula cells the file has no saved value for (written by a script, never opened in Excel).
 
-Computed by the `formulas` library: pip install unexcel[compute]. Only cells without a saved value are
+Computed by the `formulas` library: pip install cellproof[compute]. Only cells without a saved value are
 filled; Excel's own answers always win. The report labels these answers 'computed'.
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ from pathlib import Path
 
 from openpyxl.utils.cell import coordinate_to_tuple
 
-from unexcel.model import Book, Key, Kind, Value
+from cellproof.model import Book, Key, Kind, Value
 
 
 def _answer(x) -> tuple[Value, Kind]:
@@ -37,7 +37,7 @@ def fill_missing(book: Book, path: Path) -> tuple[Book, set[Key], str]:
     try:
         import formulas
     except ImportError:
-        return book, set(), "or install unexcel[compute] to compute it"
+        return book, set(), "or install cellproof[compute] to compute it"
     try:
         solution = formulas.ExcelModel().loads(str(path)).finish().calculate()
     except Exception as err:  # formulas raises many types on workbooks it can't model

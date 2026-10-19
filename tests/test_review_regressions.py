@@ -2,9 +2,9 @@
 import pytest
 from xlsxkit import book_of
 
-import unexcel.compiler as compiler
-from unexcel.compiler import compile_book
-from unexcel.verifier import execute
+import cellproof.compiler as compiler
+from cellproof.compiler import compile_book
+from cellproof.verifier import execute
 
 
 def result(formula, inputs, expected):

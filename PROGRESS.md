@@ -1,4 +1,4 @@
-# unexcel: progress
+# cellproof: progress
 
 Last updated: 2026-10-19.
 
@@ -20,7 +20,7 @@ Everything below is on `main`, built test-first, each piece reviewed by a fresh 
 | Open source | MIT license, README with limits, SECURITY.md, CI on Windows/macOS/Linux x Python 3.10-3.13 |
 
 Tests: about 370 (dbt build included), plus 3 workbooks saved by real Excel that all PASS (4 cells UNRESOLVED on
-purpose). Released as 0.1.0: public on GitHub (one-commit history) and on PyPI (`pip install unexcel`).
+purpose). Public on GitHub (one-commit history start). 0.1.0 was released as `unexcel`; 0.2.0 is `cellproof` (see CHANGELOG.md).
 
 ## Measured speed (Windows 11 laptop)
 
@@ -64,12 +64,12 @@ What Excel taught us (each has a test in `tests/test_excel_findings.py`):
 - Compile on the 200k run is 11.3 s: the dependency-order loop and reference resolving, one pass per cell. Next step
   there would be ordering a region's cells per formula shape instead of per cell. Read (8.3 s, openpyxl) is the other half.
 - Minors: a DuckDB error in one batch stops the run (cleanly: exit 3 naming the cell; none known); overflow gives `inf`, not `#NUM!`; workbook text equal to the
-  placeholder `__unexcel_cells__` is rewritten; computed-answer results are not counted separately; old tables stay in
-  `unexcel.duckdb` after a rerun.
+  placeholder `__cellproof_cells__` is rewritten; computed-answer results are not counted separately; old tables stay in
+  `cellproof.duckdb` after a rerun.
 - Backlog for one more Excel round: number -> text below 1E-11, `(-8)^(2/3)`, `(-16)^(1/4)`, `DATE(1900,13,1)`.
 
 ## Next
 
 1. Read time (openpyxl loads the workbook twice) and the per-cell dependency loop.
 2. Plan 3: AI retry loop for failed cells (it sees formula structure only, never values).
-3. Interview analysts; the name `unexcel` clashes with an R package (the PyPI name is ours).
+3. Test on real analyst workbooks.

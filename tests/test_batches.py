@@ -1,8 +1,8 @@
 from xlsxkit import book_of
 
-import unexcel.compiler as compiler
-from unexcel.compiler import compile_book
-from unexcel.verifier import execute, verify
+import cellproof.compiler as compiler
+from cellproof.compiler import compile_book
+from cellproof.verifier import execute, verify
 
 
 def run(sheets):
@@ -82,7 +82,7 @@ def test_empty_text_input_stays_empty_text():  # the seed CSV reads "" back as N
     assert got[("S", 2, 1)] == ("s", None, "x")
 
 
-from unexcel.compiler import render_batch
+from cellproof.compiler import render_batch
 
 
 def test_own_only_batch_has_only_the_new_rows():
@@ -100,7 +100,7 @@ def test_workbook_without_formulas_verifies_and_executes():  # Review Focus 1
     assert verify(book, compiled) == []
 
 
-from unexcel.compiler import batch_rows  # noqa: E402
+from cellproof.compiler import batch_rows  # noqa: E402
 
 
 def test_batch_rows_of_a_cell_batch_is_its_own_rows_sql():

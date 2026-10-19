@@ -1,7 +1,7 @@
 import pytest
 
-from unexcel.model import Unsupported
-from unexcel.parser import Binary, Bool, Call, Num, Postfix, RefNode, Str, Unary, parse, refs
+from cellproof.model import Unsupported
+from cellproof.parser import Binary, Bool, Call, Num, Postfix, RefNode, Str, Unary, parse, refs
 
 
 def test_precedence_matches_excel():

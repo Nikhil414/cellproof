@@ -1,6 +1,6 @@
 from xlsxkit import book_of
 
-from unexcel.regions import MIN_ROWS, column_order, find_regions
+from cellproof.regions import MIN_ROWS, column_order, find_regions
 
 
 def sheet(n=6):
@@ -101,8 +101,8 @@ def test_a_deeply_nested_formula_stays_in_cell_mode_instead_of_crashing():
 
 def test_regions_are_ordered_with_a_single_graph_pass(monkeypatch):
     """Regions cannot hide a cycle inside themselves, so the extra ungrouped pass is skipped when nothing is unresolved."""
-    import unexcel.graph as graph
-    from unexcel.regions import order_with_regions
+    import cellproof.graph as graph
+    from cellproof.regions import order_with_regions
 
     calls = []
     real = graph.formula_order
@@ -119,7 +119,7 @@ def test_regions_are_ordered_with_a_single_graph_pass(monkeypatch):
 
 
 def test_a_true_cycle_elsewhere_still_runs_the_full_guard():
-    from unexcel.regions import order_with_regions
+    from cellproof.regions import order_with_regions
 
     spec = {"Z1": ("=Z2", 0.0), "Z2": ("=Z1", 0.0)}  # a true cycle outside the region
     for r in range(2, 8):

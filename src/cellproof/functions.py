@@ -6,10 +6,10 @@ Every function returns its Excel error in Expr.err; see expr.errs for the order 
 """
 from __future__ import annotations
 
-from unexcel.expr import CELLS, NO_ERR, ZERO, Expr, any_of, as_bool, errs, lit_str, num, pick, unify, where_area
-from unexcel.model import Unsupported, a1
-from unexcel.parser import Bool, Num, RefNode, Str
-from unexcel.refs import Area, resolve
+from cellproof.expr import CELLS, NO_ERR, ZERO, Expr, any_of, as_bool, errs, lit_str, num, pick, unify, where_area
+from cellproof.model import Unsupported, a1
+from cellproof.parser import Bool, Num, RefNode, Str
+from cellproof.refs import Area, resolve
 
 FUNCS = {}
 

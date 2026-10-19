@@ -1,6 +1,6 @@
 """200k-formula workbook, timed (DESIGN.md §2.1 and §7). Slow, so opt-in:
 
-    UNEXCEL_PERF=1 python -m pytest tests/test_perf.py -s
+    CELLPROOF_PERF=1 python -m pytest tests/test_perf.py -s
 """
 import os
 import time
@@ -8,12 +8,12 @@ import time
 import pytest
 from xlsxkit import write_xlsx
 
-from unexcel.compiler import compile_book
-from unexcel.emitter import write_project
-from unexcel.reader import load
-from unexcel.verifier import verify
+from cellproof.compiler import compile_book
+from cellproof.emitter import write_project
+from cellproof.reader import load
+from cellproof.verifier import verify
 
-pytestmark = pytest.mark.skipif(not os.environ.get("UNEXCEL_PERF"), reason="slow: set UNEXCEL_PERF=1")
+pytestmark = pytest.mark.skipif(not os.environ.get("CELLPROOF_PERF"), reason="slow: set CELLPROOF_PERF=1")
 ROWS = 50_000  # four formula columns -> 200,000 formula cells, plus two summary cells
 
 

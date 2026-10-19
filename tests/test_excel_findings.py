@@ -5,8 +5,8 @@ Each expected value below is Excel's own answer, not ours. If one fails, fix the
 import pytest
 from xlsxkit import book_of
 
-from unexcel.compiler import compile_book
-from unexcel.verifier import execute
+from cellproof.compiler import compile_book
+from cellproof.verifier import execute
 
 # S!A1:A4 - 5, "5", apple, a formula that returns ""; S!H1 is an error; S!D1:D3 is sorted ascending
 S = {

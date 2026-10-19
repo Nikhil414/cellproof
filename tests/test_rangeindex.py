@@ -4,7 +4,7 @@ import pytest
 
 from xlsxkit import book_of
 
-from unexcel.rangeindex import FIELDS, SHIFT, RangeIndex, field
+from cellproof.rangeindex import FIELDS, SHIFT, RangeIndex, field
 
 
 def test_summary_matches_a_brute_force_count():

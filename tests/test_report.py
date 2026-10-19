@@ -1,7 +1,7 @@
 import json
 
-from unexcel.model import Verdict
-from unexcel.report import write_report
+from cellproof.model import Verdict
+from cellproof.report import write_report
 
 
 def test_report_counts_sections_and_dedupes_findings(tmp_path):
@@ -29,7 +29,7 @@ def test_empty_sections_are_left_out(tmp_path):
 
 
 def test_regions_section_lists_the_notes(tmp_path):
-    from unexcel.report import write_report
+    from cellproof.report import write_report
     write_report([], [], tmp_path, "b.xlsx", notes=["Data rows 2-9, columns B -> model region_data_2_9",
                                                     "Data column C rows 2-9 stays in cell mode: reads A1"])
     md = (tmp_path / "REPORT.md").read_text(encoding="utf-8")
@@ -38,6 +38,6 @@ def test_regions_section_lists_the_notes(tmp_path):
 
 
 def test_no_regions_section_without_notes(tmp_path):
-    from unexcel.report import write_report
+    from cellproof.report import write_report
     write_report([], [], tmp_path, "b.xlsx")
     assert "## Regions" not in (tmp_path / "REPORT.md").read_text(encoding="utf-8")

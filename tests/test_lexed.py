@@ -1,9 +1,9 @@
 """lexed() predicts a pasted-down formula's text instead of tokenizing it; it must equal tokenizing every cell."""
 from xlsxkit import book_of
 
-from unexcel.model import Unsupported
-from unexcel.parser import parse, refs
-from unexcel.r1c1 import lexed, r1c1_key
+from cellproof.model import Unsupported
+from cellproof.parser import parse, refs
+from cellproof.r1c1 import lexed, r1c1_key
 
 TEMPLATES = [
     "A{r}*2", "$A{r}+A${r}+$A$1", "SUM($B$1:B{r})", "VLOOKUP(A{r},Tbl!$A$1:$B$9,2,FALSE)",
@@ -42,7 +42,7 @@ def test_lexed_equals_tokenizing_every_cell():
 
 
 def test_a_run_is_tokenized_once(monkeypatch):
-    import unexcel.r1c1 as r1c1
+    import cellproof.r1c1 as r1c1
     made = []
     real = r1c1.Shape.__init__
     monkeypatch.setattr(r1c1.Shape, "__init__", lambda self, *a: (made.append(a), real(self, *a))[1])

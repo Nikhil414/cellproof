@@ -5,7 +5,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from unexcel.model import Key, Verdict, a1
+from cellproof.model import Key, Verdict, a1
 
 
 def _md(value) -> str:
@@ -29,7 +29,7 @@ def write_report(verdicts: list[Verdict], findings: list[str], out: Path, source
     }
     (out / "report.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    lines = [f"# unexcel report: {source}", "", "| Status | Cells |", "|---|---|"]
+    lines = [f"# cellproof report: {source}", "", "| Status | Cells |", "|---|---|"]
     lines += [f"| {status} | {counts[status]} |" for status in ("PASS", "FAIL", "UNRESOLVED")]
     if computed:
         lines += ["", f"{len(computed)} formula cells had no saved value. Their expected values were computed "

@@ -1,4 +1,6 @@
-# unexcel: guide for coding agents and contributors
+# cellproof: guide for coding agents and contributors
+
+The project was called `unexcel` until 0.2.0; the older plans and specs still use that name.
 
 Read `README.md` first (what the tool does, limits), then `PROGRESS.md` (current state and next steps). `DESIGN.md` is
 the original spec; `docs/superpowers/specs/` and `docs/superpowers/plans/` hold the design and plan of each later
@@ -10,10 +12,10 @@ piece. `PLAN*.md` are the early plans, kept for history.
 python -m venv .venv && . .venv/bin/activate       # Windows: .venv\Scripts\activate
 pip install -e ".[dev,dbt,compute]"
 python -m pytest tests -q                            # dbt must be on PATH (activate the venv) or the dbt tests skip
-UNEXCEL_PERF=1 python -m pytest tests/test_perf.py -s  # 200k-formula benchmark
+CELLPROOF_PERF=1 python -m pytest tests/test_perf.py -s  # 200k-formula benchmark
 ```
 
-## Code map (`src/unexcel/`)
+## Code map (`src/cellproof/`)
 
 | Module | Job |
 |---|---|

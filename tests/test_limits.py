@@ -1,7 +1,7 @@
 from xlsxkit import book_of
 
-from unexcel.compiler import DEEP, TOO_BIG, compile_book
-from unexcel.verifier import verify
+from cellproof.compiler import DEEP, TOO_BIG, compile_book
+from cellproof.verifier import verify
 
 
 def test_very_long_formula_is_unresolved_not_a_crash():
