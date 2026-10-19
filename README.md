@@ -97,8 +97,12 @@ cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each re
   INDEX used as a reference, the 1904 date system in TEXT date formats.
 - **Approximate lookups on unsorted data** (MATCH/VLOOKUP/HLOOKUP with match type 1/-1): UNRESOLVED, because Excel's
   answer then depends on its binary search.
-- **Text to number:** only plain numbers convert (`"3"`, `" -1.5e3 "`). Excel also reads `"1,000"`, `"$5"`, `"50%"`;
-  cellproof gives `#VALUE!`, which shows as a FAIL.
+- **Text to number:** only plain numbers convert (`"3"`, `" -1.5e3 "`). Text Excel reads with the computer's language
+  settings (`"1,000"`, `"$5"`, `"50%"`, `"1/2/2020"`, `"2:00 PM"`, `"Jan 5"`) makes the cell UNRESOLVED, because the
+  file does not record those settings.
+- **Who saved the file:** the report warns when it was last saved by another program (LibreOffice, a script): the
+  saved values then follow that program's rules. In a file Excel for Mac calculated, `CHAR` above 127 is UNRESOLVED
+  (the Mac character set differs).
 - **Some function options:** SUBTOTAL 101-111 (hidden rows), DATEDIF units MD/YM/YD, WEEKDAY types 11-17, TEXT formats
   outside the supported table, COUNT or MEDIAN of values typed into the formula, criteria taken from an empty cell.
 - **Floating point:** a running total becomes a fast window function only when Excel's saved values prove the different

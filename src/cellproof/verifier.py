@@ -8,6 +8,7 @@ from pathlib import Path
 import duckdb
 
 from cellproof.compiler import READ_SEED, Compiled, batch_rows, write_seed
+from cellproof.expr import SETTINGS
 from cellproof.model import Book, Cell, Key, Verdict, a1
 
 
@@ -55,6 +56,9 @@ def verify(book: Book, compiled: Compiled) -> list[Verdict]:
     for step in compiled.steps:
         cell = book.cells[step.key]
         kind, n, t = got[step.key]
+        if kind == "e" and t in SETTINGS:  # the answer depends on settings the file does not record
+            out.append(Verdict(step.key, "UNRESOLVED", cell.value, None, SETTINGS[t]))
+            continue
         actual = t if kind in ("s", "e") else (bool(n) if kind == "b" and n is not None else n)
         out.append(Verdict(step.key, "PASS" if matches(cell, kind, n, t) else "FAIL", cell.value, actual))
     for key, reason in compiled.unresolved.items():

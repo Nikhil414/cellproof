@@ -7,7 +7,7 @@ Excel does, so ROUNDUP(0.1*3, 1) is 0.3, not 0.4.
 """
 from __future__ import annotations
 
-from cellproof.expr import ZERO, Expr, errs, num
+from cellproof.expr import ZERO, Expr, errs, num, num_strict
 from cellproof.functions import arity, register
 from cellproof.parser import Binary
 
@@ -102,6 +102,9 @@ _digits("TRUNC", "floor")
 def _multiple(name: str, rnd: str, zero_code: str | None):
     def fn(c, args, sheet):
         x, m = _two(c, args, sheet, name)
+        if name == "MROUND":  # real Excel: MROUND(TRUE,0) is #VALUE!
+            arity(name, args, 2, 2)
+            x, m = (num_strict(c.expr(a, sheet)) for a in args)
         bad = f"({x.sql} > 0 AND {m.sql} < 0)" if name != "MROUND" else f"({x.sql} * {m.sql} < 0)"
         if zero_code:
             bad = f"({bad} OR {m.sql} = 0)"

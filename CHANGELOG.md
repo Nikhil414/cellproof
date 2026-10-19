@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+Found by running all 85 public test workbooks of pycel, formulas and xlcalculator (`python tests/corpus.py DIR`):
+FAIL 229 -> 10 (all 10 in files LibreOffice saved, which the report now says), no crashes.
+
+- **Reading:** a defined name that is a formula of names (`=h+i`) no longer crashes the load; a date-formatted number
+  keeps its serial (Excel's 29 February 1900 and date-formatted negatives were lost); text escaped by the file format
+  (`_x000D_`, written for a carriage return) is decoded as Excel does.
+- **AND/OR/XOR** skip text and empty cells in references, and typed text other than TRUE/FALSE, like Excel.
+- **An empty or omitted result is 0:** `IF(c,,"x")`, `IFERROR(A1,"x")` with A1 empty.
+- **EDATE/EOMONTH/MROUND/VALUE** refuse TRUE/FALSE (`#VALUE!`); `EOMONTH(0,0)` is 31.
+- **SUMPRODUCT** of ranges of different sizes returns an error inside them before `#VALUE!`.
+- **PROPER** accepts another cell's value (DuckDB refused the SQL) and capitalizes accented letters.
+- **Locale-dependent text** (`"1,000"`, `"1/2/2020"`) is UNRESOLVED instead of a wrong `#VALUE!`.
+- **Report:** warns when the file was not last saved by Excel; CHAR above 127 in a Mac-calculated file is UNRESOLVED.
+
 ## 0.2.0 (2026-10-19)
 
 - **Renamed** from `unexcel` to `cellproof` (the old name clashed with an R package): `pip install cellproof`, command

@@ -6,7 +6,7 @@ Excel stores a date as a serial number: 1 = 1900-01-01, and it counts a 29 Febru
 """
 from __future__ import annotations
 
-from cellproof.expr import Expr, errs, num
+from cellproof.expr import Expr, errs, num, num_strict
 from cellproof.fn.lookup import int_literal
 from cellproof.fn.text import FORMATS
 from cellproof.functions import arity, register
@@ -21,9 +21,9 @@ def _check(c) -> None:
         raise Unsupported("1904 date system not supported yet")
 
 
-def _serial(c, node, sheet: str) -> Expr:
+def _serial(c, node, sheet: str, strict: bool = False) -> Expr:
     _check(c)
-    s = num(c.expr(node, sheet))
+    s = (num_strict if strict else num)(c.expr(node, sheet))
     return Expr(f"floor({s.sql})", "num", errs(s.err, f"(CASE WHEN {s.sql} < 0 OR {s.sql} > {MAX_SERIAL} THEN '#NUM!' END)"))
 
 
@@ -98,8 +98,10 @@ def days(c, args, sheet):
 def _shift(name: str, last: bool):
     def impl(c, args, sheet):
         arity(name, args, 2, 2)
-        s, m = _serial(c, args[0], sheet), num(c.expr(args[1], sheet))
-        d = f"CAST({to_date(s.sql)} + to_months(CAST(trunc({m.sql}) AS INTEGER)) AS DATE)"
+        # real Excel: TRUE/FALSE in either argument is #VALUE!
+        s, m = _serial(c, args[0], sheet, strict=True), num_strict(c.expr(args[1], sheet))
+        start = f"greatest({s.sql}, 1)" if last else s.sql  # serial 0 is "1900-01-00": EOMONTH(0,0) is 31
+        d = f"CAST({to_date(start)} + to_months(CAST(trunc({m.sql}) AS INTEGER)) AS DATE)"
         if last:
             d = f"last_day({d})"
         ok = f"({_ok(s)} AND ({m.err}) IS NULL AND trunc({m.sql}) BETWEEN -120000 AND 120000)"

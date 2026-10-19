@@ -22,6 +22,14 @@ Everything below is on `main`, built test-first, each piece reviewed by a fresh 
 Tests: about 370 (dbt build included), plus 3 workbooks saved by real Excel that all PASS (4 cells UNRESOLVED on
 purpose). Public on GitHub (one-commit history start). 0.1.0 was released as `unexcel`; 0.2.0 is on PyPI as `cellproof` (2026-10-19, see CHANGELOG.md).
 
+## Public test workbooks (2026-10-19)
+
+`python tests/corpus.py DIR` runs the 85 .xlsx/.xlsm test files of pycel, formulas and xlcalculator (Excel-saved,
+except 8 LibreOffice ones): 4,693 PASS, 10 FAIL (all in LibreOffice files, flagged in their reports), 18,945
+UNRESOLVED, no crashes. The UNRESOLVED are mostly functions those files test on purpose: CONVERT, YEARFRAC,
+DEC2HEX/BIN/OCT, array formulas and `{1,2}` constants, CODE/UNICODE, LOOKUP. For business workbooks the ones that
+matter are array formulas, array constants, LOOKUP and YEARFRAC. Findings are tests in `tests/test_corpus_findings.py`.
+
 ## Measured speed (Windows 11 laptop)
 
 | Workbook | Before table mode | Now |

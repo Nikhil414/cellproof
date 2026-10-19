@@ -7,7 +7,7 @@ date formats to FORMATS.
 """
 from __future__ import annotations
 
-from cellproof.expr import BLANK, CELLS, NO_ERR, Expr, errs, num, num_text, txt, where_area
+from cellproof.expr import BLANK, CELLS, NO_ERR, PLATFORM, Expr, errs, num, num_strict, num_text, txt, where_area
 from cellproof.functions import arity, register
 from cellproof.model import Unsupported
 from cellproof.parser import Bool, RefNode, Str
@@ -128,8 +128,11 @@ _text1("LEN", lambda t: f"CAST(length({t}) AS DOUBLE)", "num")
 _text1("TRIM", lambda t: f"regexp_replace(trim({t}, ' '), ' +', ' ', 'g')")  # Excel also squeezes inner spaces
 _text1("UPPER", lambda t: f"upper({t})")
 _text1("LOWER", lambda t: f"lower({t})")
-_text1("PROPER", lambda t: (f"array_to_string(list_transform(range(length({t})), i -> CASE WHEN i = 0 OR NOT "
-                            f"regexp_matches({t}[i], '[[:alpha:]]') THEN upper({t}[i + 1]) ELSE lower({t}[i + 1]) END), '')"))
+# each character paired with the one before it; t stays outside the lambda (it can be a subquery, which DuckDB does
+# not allow inside one). \p{L}: any letter, accented ones too (RE2's [[:alpha:]] is ASCII only)
+_text1("PROPER", lambda t: (f"array_to_string(list_transform(list_zip(string_split({t}, ''), "
+                            f"list_concat([' '], string_split({t}, ''))), x -> CASE WHEN "
+                            f"regexp_matches(x[2], '\\p{{L}}') THEN lower(x[1]) ELSE upper(x[1]) END), '')"))
 _text1("CLEAN", lambda t: f"regexp_replace({t}, '[\\x00-\\x1f]', '', 'g')")
 
 
@@ -198,7 +201,7 @@ def rept(c, args, sheet):
 @register("VALUE")
 def value(c, args, sheet):
     arity("VALUE", args, 1, 1)
-    return num(c.expr(args[0], sheet))
+    return num_strict(c.expr(args[0], sheet))
 
 
 @register("EXACT")
@@ -217,9 +220,10 @@ def char(c, args, sheet):
     n = _n(c, args[0], sheet)
     k = f"TRY_CAST(trunc({n.sql}) AS INTEGER)"
     table = "'" + CP1252.replace("'", "''") + "'"
+    mac = f"(CASE WHEN {k} BETWEEN 128 AND 255 THEN '{PLATFORM}' END)" if "Macintosh" in c.book.app else NO_ERR
     return Expr(f"(CASE WHEN {k} BETWEEN 128 AND 159 THEN substr({table}, {k} - 127, 1) "
                 f"WHEN {k} BETWEEN 1 AND 255 THEN chr({k}) END)", "txt",
-                errs(n.err, _bad(f"COALESCE({k} < 1 OR {k} > 255, TRUE)")))  # Windows-1252, the character set of Excel for Windows
+                errs(n.err, _bad(f"COALESCE({k} < 1 OR {k} > 255, TRUE)"), mac))  # Windows-1252, the character set of Excel for Windows
 
 
 def _fixed(decimals: int, grouped: bool, percent: bool):

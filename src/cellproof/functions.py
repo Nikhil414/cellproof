@@ -6,7 +6,8 @@ Every function returns its Excel error in Expr.err; see expr.errs for the order 
 """
 from __future__ import annotations
 
-from cellproof.expr import CELLS, NO_ERR, ZERO, Expr, any_of, as_bool, errs, lit_str, num, pick, unify, where_area
+from cellproof.expr import (CELLS, NO_ERR, ZERO, Expr, _text_bool, any_of, as_bool, errs, keep_locale, lit_str, num,
+                            pick, unify, where_area)
 from cellproof.model import Unsupported, a1
 from cellproof.parser import Bool, Num, RefNode, Str
 from cellproof.refs import Area, resolve
@@ -89,18 +90,46 @@ def round_(c, args, sheet):
     return Expr(f"ROUND({x.sql}, CAST(TRUNC({digits.sql}) AS INTEGER))", "num", errs(x.err, digits.err))
 
 
-def _logic(name, joiner):
+def logical_args(c, name: str, args, sheet: str) -> tuple[list[str], str]:
+    """AND/OR/XOR arguments: (TRUE/FALSE SQL per argument, NULL when it is skipped; their error).
+
+    Real Excel: text and empty cells in a reference are skipped, and so is typed text other than TRUE/FALSE
+    (AND(TRUE,"0") is TRUE); an error in an argument comes first (AND(TRUE,"0",#REF!) is #REF!); nothing left to judge
+    is #VALUE!."""
+    if not args:
+        raise Unsupported(f"{name} needs arguments")
+    values, arg_errs, conv_errs = [], [], []
+    for a in args:
+        if isinstance(a, RefNode) and not resolve(a.text, sheet, c.book).is_single:
+            raise Unsupported(f"{name} over ranges not supported yet")
+        x = c.expr(a, sheet)
+        arg_errs.append(x.err)
+        if isinstance(a, RefNode) and x.type in ("txt", "blank"):
+            values.append("CAST(NULL AS BOOLEAN)")
+        elif isinstance(a, RefNode) and x.type == "any":
+            values.append(f"(CASE WHEN {x.kind} = 's' THEN NULL ELSE {x.sql} <> 0 END)")
+        elif x.type == "txt":
+            values.append(_text_bool(x.sql))
+        elif x.type == "any":
+            values.append(f"(CASE WHEN {x.kind} = 's' THEN {_text_bool(x.txt)} ELSE {x.sql} <> 0 END)")
+        else:
+            b = as_bool(Expr(x.sql, x.type, NO_ERR, x.txt, x.kind))  # without x.err: only the conversion's error
+            values.append(b.sql)
+            conv_errs.append(b.err)
+    none = "(CASE WHEN " + " AND ".join(f"{v} IS NULL" for v in values) + " THEN '#VALUE!' END)"
+    return values, errs(*arg_errs, *conv_errs, none)
+
+
+def _logic(name, joiner, skip):
     def fn(c, args, sheet):
-        if not args:
-            raise Unsupported(f"{name} needs arguments")
-        parts = [as_bool(c.expr(a, sheet)) for a in args]
-        return Expr("(" + f" {joiner} ".join(p.sql for p in parts) + ")", "bool", errs(*(p.err for p in parts)))
+        values, err = logical_args(c, name, args, sheet)
+        return Expr("(" + f" {joiner} ".join(f"COALESCE({v}, {skip})" for v in values) + ")", "bool", err)
 
     return fn
 
 
-FUNCS["AND"] = _logic("AND", "AND")
-FUNCS["OR"] = _logic("OR", "OR")
+FUNCS["AND"] = _logic("AND", "AND", "TRUE")
+FUNCS["OR"] = _logic("OR", "OR", "FALSE")
 
 
 @register("IFERROR")
@@ -111,4 +140,4 @@ def iferror(c, args, sheet):
         return value
     ok = f"(({value.err}) IS NULL)"
     err = NO_ERR if fallback.err == NO_ERR else f"(CASE WHEN {ok} THEN NULL ELSE {fallback.err} END)"
-    return pick(ok, value, fallback, err)
+    return pick(ok, value, fallback, errs(keep_locale(value.err), err))

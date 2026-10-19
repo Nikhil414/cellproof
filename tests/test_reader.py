@@ -103,3 +103,20 @@ def test_a_styled_cell_on_the_last_row_does_not_make_reading_slow(tmp_path):  # 
     book = load(p)
     assert time.perf_counter() - start < 3  # walking every row x column took 6 s here, 24 s and 3.8 GB at column Z
     assert len(book.cells) == 200 and book.max_row["S"] == 1_048_576
+
+
+def test_a_defined_name_openpyxl_cannot_resolve_is_skipped_not_a_crash(tmp_path):
+    from openpyxl.workbook.defined_name import DefinedName
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "S"
+    ws["A1"], ws["B1"], ws["C1"] = 1, 2, "=SUM(both)"
+    wb.defined_names["one"] = DefinedName("one", attr_text="S!$A$1")
+    wb.defined_names["two"] = DefinedName("two", attr_text="S!$B$1")
+    wb.defined_names["both"] = DefinedName("both", attr_text="one+two")  # openpyxl's destinations raises on this
+    path = tmp_path / "n.xlsx"
+    wb.save(path)
+    book = load(path)
+    assert "BOTH" not in book.names and book.names["ONE"] == ("S", "A1")
+    compiled = compile_book(book)
+    assert ("S", 1, 3) in compiled.unresolved

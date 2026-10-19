@@ -33,7 +33,7 @@ def test_text_to_number_and_number_to_text():
     }})
     assert c.unresolved == {}
     assert [got[("S", r, 2)] for r in range(1, 11)] == [
-        ("n", 4.0, None), ("n", 6.0, None), ("e", None, "#VALUE!"), ("e", None, "#VALUE!"),
+        ("n", 4.0, None), ("n", 6.0, None), ("e", None, "#VALUE!"), ("e", None, "#LOCALE"),  # "1,000": locale-dependent
         ("s", None, "x0.333333333333333"), ("s", None, "x0.3"), ("s", None, "xTRUE"), ("s", None, "1000000000000000000"),  # real Excel writes 1E+18 as plain digits
         ("n", 1.0, None), ("e", None, "#VALUE!")]
 

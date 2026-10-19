@@ -264,6 +264,9 @@ def compile_book(book: Book, regions: bool = True) -> Compiled:
     scan = find_regions(book) if regions else RegionScan([], [])
     order, unresolved, kept = order_with_regions(book, scan.regions)
     comp = Compiler(book)
+    if book.app and not (book.app.startswith("Microsoft") and "Compatible" not in book.app):  # openpyxl: "Compatible"
+        comp.findings.append(f"the file was last saved by {book.app}, not Microsoft Excel: its saved values follow that "
+                             "program's rules, so a FAIL can be a difference between that program and Excel")
     batches: list = []
     current: list[Step] = []
     weight = 0

@@ -4,8 +4,8 @@ The IS functions look at a value without failing: an error in their argument is 
 """
 from __future__ import annotations
 
-from cellproof.expr import NO_ERR, Expr, as_bool, compare, error, errs, pick, unify, unify_all
-from cellproof.functions import arity, register
+from cellproof.expr import NO_ERR, Expr, as_bool, compare, error, errs, keep_locale, pick, unify, unify_all
+from cellproof.functions import arity, logical_args, register
 from cellproof.model import Unsupported
 from cellproof.parser import RefNode
 from cellproof.refs import resolve
@@ -60,11 +60,9 @@ def not_(c, args, sheet):
 
 @register("XOR")
 def xor(c, args, sheet):
-    if not args or any(isinstance(a, RefNode) and not resolve(a.text, sheet, c.book).is_single for a in args):
-        raise Unsupported("XOR over ranges not supported yet")
-    parts = [as_bool(c.expr(a, sheet)) for a in args]
-    total = " + ".join(f"CAST({p.sql} AS INTEGER)" for p in parts)
-    return Expr(f"(({total}) % 2 = 1)", "bool", errs(*(p.err for p in parts)))
+    values, err = logical_args(c, "XOR", args, sheet)
+    total = " + ".join(f"CAST(COALESCE({v}, FALSE) AS INTEGER)" for v in values)
+    return Expr(f"(({total}) % 2 = 1)", "bool", err)
 
 
 @register("IFNA")
@@ -80,7 +78,8 @@ def ifna(c, args, sheet):
 def _is(name: str, test):
     def fn(c, args, sheet):
         arity(name, args, 1, 1)
-        return Expr(test(c.expr(args[0], sheet)), "bool")
+        x = c.expr(args[0], sheet)
+        return Expr(test(x), "bool", keep_locale(x.err))
     register(name)(fn)
 
 

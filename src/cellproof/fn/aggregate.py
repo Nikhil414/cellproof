@@ -152,7 +152,7 @@ def sumproduct(c, args, sheet):
     first = ranges[0].area
     shape = (first.r2 - first.r1, first.c2 - first.c1)
     if any((r.area.r2 - r.area.r1, r.area.c2 - r.area.c1) != shape for r in ranges):
-        return Expr("NULL", "num", "'#VALUE!'")  # Excel: ranges of different sizes
+        return Expr("NULL", "num", errs(_errs(c, ranges, []), "'#VALUE!'"))  # Excel: an error inside first, then sizes
     joins = "".join(
         f" JOIN {CELLS} a{i} ON a{i}.sheet = {lit_str(r.area.sheet).sql} "
         f"AND a{i}.row_num = a0.row_num + {r.area.r1 - first.r1} AND a{i}.col_num = a0.col_num + {r.area.c1 - first.c1} "

@@ -9,6 +9,14 @@ from cellproof.model import Key, Unsupported
 
 CELLS = "__cellproof_cells__"  # every cell known before the current batch; replaced when SQL is rendered
 NO_ERR = "NULL"  # the err of an expression that cannot fail
+# Not an Excel error: text Excel would read as a number using the computer's language settings ("1/2/2020", "1,000",
+# "2:00 PM"), which the file does not record. The verifier reports a cell holding it as UNRESOLVED.
+LOCALE = "#LOCALE"
+LOCALE_REASON = ("reads text as a number, date or time (like \"1/2/2020\" or \"1,000\"): Excel does that with the "
+                 "computer's language settings, which the file does not record")
+PLATFORM = "#PLATFORM"  # not an Excel error either: Excel for Mac answers differently (CHAR above 127)
+PLATFORM_REASON = "CHAR above 127 gives a different character in Excel for Mac, which last calculated this file"
+SETTINGS = {LOCALE: LOCALE_REASON, PLATFORM: PLATFORM_REASON}  # markers the verifier reports as UNRESOLVED
 Type = Literal["num", "txt", "bool", "blank", "err", "any"]
 
 
@@ -80,6 +88,16 @@ def _value_error(bad: str) -> str:
     return f"(CASE WHEN {bad} THEN '#VALUE!' END)"
 
 
+MONTHS = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
+
+
+def _text_error(t: str, n: str) -> str:
+    """#VALUE! when text t does not read as a number (n is NULL), LOCALE when it might in some language settings."""
+    local = (f"(regexp_matches({t}, '[0-9]\\s*[-/:.,]\\s*[0-9]|[0-9]\\s*%|[$\u20ac\u00a3\u00a5]') "
+             f"OR regexp_matches(lower({t}), '[0-9]\\s*[ap][.]?m|[0-9][^a-z]*({MONTHS})|({MONTHS})[a-z]*[^a-z0-9]*[0-9]'))")
+    return f"(CASE WHEN {n} IS NULL THEN (CASE WHEN {local} THEN '{LOCALE}' ELSE '#VALUE!' END) END)"
+
+
 def num(e: Expr) -> Expr:
     if e.type == "num":
         return e
@@ -91,10 +109,26 @@ def num(e: Expr) -> Expr:
         return Expr("CAST(NULL AS DOUBLE)", "num", e.err)
     if e.type == "txt":
         n = parse_num(e.sql)
-        return Expr(n, "num", errs(e.err, _value_error(f"{n} IS NULL")))
+        return Expr(n, "num", errs(e.err, _text_error(e.sql, n)))
     n = parse_num(e.txt)
     return Expr(f"(CASE WHEN {e.kind} = 's' THEN {n} ELSE {e.sql} END)", "num",
-                errs(e.err, _value_error(f"{e.kind} = 's' AND {n} IS NULL")))
+                errs(e.err, f"(CASE WHEN {e.kind} = 's' THEN {_text_error(e.txt, n)} END)"))
+
+
+def num_strict(e: Expr) -> Expr:
+    """A number argument that real Excel refuses as TRUE/FALSE (EDATE, EOMONTH, MROUND, VALUE): #VALUE!."""
+    if e.type == "bool":
+        return Expr("CAST(NULL AS DOUBLE)", "num", errs(e.err, "'#VALUE!'"))
+    n = num(e)
+    if e.type == "any":
+        return Expr(n.sql, "num", errs(n.err, f"(CASE WHEN {e.kind} = 'b' THEN '#VALUE!' END)"))
+    return n
+
+
+def keep_locale(err: str) -> str:
+    """err if it is a SETTINGS marker, else NULL: functions that look at errors (IFERROR, ISERROR) must not hide it."""
+    codes = ", ".join(f"'{k}'" for k in SETTINGS)
+    return NO_ERR if err == NO_ERR else f"(CASE WHEN ({err}) IN ({codes}) THEN ({err}) END)"
 
 
 def _bool_text(b: str) -> str:
@@ -161,6 +195,8 @@ def unify(a: Expr, b: Expr) -> tuple[Expr, Expr]:
 
 
 def unify_all(es: list[Expr]) -> list[Expr]:
+    # an empty cell or an omitted argument returned as a result is 0 (IF(TRUE,,"x"), IFERROR(A1,"x") with A1 empty)
+    es = [ZERO if e.type == "blank" else e for e in es]
     fixed = {e.type for e in es} - set(FLEX)
     if not fixed:
         return [num(e) for e in es]
