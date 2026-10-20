@@ -28,7 +28,7 @@ CELLPROOF_PERF=1 python -m pytest tests/test_perf.py -s  # 200k-formula benchmar
 | `expr.py` | `Expr` (SQL value + SQL error code), Excel coercions |
 | `compiler.py` | cell mode: formula -> SQL in batches |
 | `region.py` | a region -> one set-based statement (window functions for running totals) |
-| `functions.py`, `fn/` | the 94 Excel functions |
+| `functions.py`, `fn/` | the 96 Excel functions |
 | `verifier.py` | runs everything on DuckDB and compares with Excel's saved values |
 | `emitter.py` | writes the dbt project; `--dbt` runs `dbt build` |
 | `report.py`, `cli.py`, `compute.py` | REPORT.md/report.json, the CLI, the optional `formulas` answer key |

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **LOOKUP** (vector and array form). Like the other approximate lookups, UNRESOLVED on data out of order.
+- **YEARFRAC**, all five bases, the basis written in the formula or computed. The 1,992 YEARFRAC cells of pycel's
+  test workbook all PASS; a date before 1 March 1900 (Excel's 29 February 1900) is UNRESOLVED.
+- **Array constants** (`{0,50,100}`, `{1,"a";2,"b"}`) wherever a range is taken: `LOOKUP(x,{0,50,100},{"F","C","A"})`,
+  `MATCH(x,{...},0)`, `SUM({...})`. Used as one value (`A1*{1,2}`) they stay UNRESOLVED.
+
 ## 0.2.1 (2026-10-20)
 
 Found by running all 85 public test workbooks of pycel, formulas and xlcalculator (`python tests/corpus.py DIR`):

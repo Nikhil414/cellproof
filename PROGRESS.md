@@ -20,15 +20,15 @@ Everything below is on `main`, built test-first, each piece reviewed by a fresh 
 | Criteria row-wise | the *IF(S) family with a criterion from the row (`=COUNTIFS($E:$E,">"&A2,...)`) compiles into the region's statement too |
 | Open source | MIT license, README with limits, SECURITY.md, CI on Windows/macOS/Linux x Python 3.10-3.13 |
 
-Tests: about 425 (dbt build included), plus 3 workbooks saved by real Excel that all PASS (4 cells UNRESOLVED on
+Tests: about 437 (dbt build included), plus 3 workbooks saved by real Excel that all PASS (4 cells UNRESOLVED on
 purpose). Public on GitHub (one-commit history start). 0.1.0 was released as `unexcel`; 0.2.0 (2026-10-19) and 0.2.1 (2026-10-20) are on PyPI as `cellproof` (see CHANGELOG.md).
 A user's practice workbook: 3 PASS / 47 UNRESOLVED -> 48 PASS / 0 FAIL / 2 UNRESOLVED.
 
 ## Public test workbooks (2026-10-19)
 
 `python tests/corpus.py DIR` runs the 85 .xlsx/.xlsm test files of pycel, formulas and xlcalculator (Excel-saved,
-except 8 LibreOffice ones): 4,693 PASS, 10 FAIL (all in LibreOffice files, flagged in their reports), 18,945
-UNRESOLVED, no crashes. The UNRESOLVED are mostly functions those files test on purpose: CONVERT, YEARFRAC,
+except 8 LibreOffice ones): 6,874 PASS, 10 FAIL (all in LibreOffice files, flagged in their reports), 16,764
+UNRESOLVED, no crashes (was 4,693 PASS before LOOKUP, YEARFRAC and array constants). The UNRESOLVED are mostly functions those files test on purpose: CONVERT, YEARFRAC,
 DEC2HEX/BIN/OCT, array formulas and `{1,2}` constants, CODE/UNICODE, LOOKUP. For business workbooks the ones that
 matter are array formulas, array constants, LOOKUP and YEARFRAC. Findings are tests in `tests/test_corpus_findings.py`.
 
@@ -80,8 +80,8 @@ What Excel taught us (each has a test in `tests/test_excel_findings.py`):
 
 ## Next
 
-1. Close the UNRESOLVED gaps business workbooks hit: LOOKUP, YEARFRAC, array constants (`{1,2,3}`), simple array
-   formulas (`SUM(A1:A10*B1:B10)`, `MAX(IF(...))`).
+1. Array formulas and array evaluation (`SUM(A1:A10*B1:B10)`, `MAX(IF(...))`, `A1*{1,2}`). LOOKUP, YEARFRAC and
+   array constants where a range is taken are done (unreleased).
 2. Test on more real analyst workbooks (one user workbook found 4 gaps the 85 public files did not).
 3. Read time (openpyxl loads the workbook twice) and the per-cell dependency loop.
 4. Plan 3: AI retry loop for failed cells (it sees formula structure only, never values).

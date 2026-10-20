@@ -20,7 +20,7 @@ from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, any_of, compare, error, 
 from cellproof.functions import FUNCS
 from cellproof.graph import formula_order
 from cellproof.model import Book, Cell, Key, Unsupported, a1
-from cellproof.parser import Binary, Bool, Call, ErrLit, Num, Postfix, RefNode, Str, Unary, parse
+from cellproof.parser import ARRAYS, Binary, Bool, Call, ErrLit, Num, Postfix, RefNode, Str, Unary, arrays, parse
 from cellproof.rangeindex import RangeIndex, field
 from cellproof.refs import Area, resolve
 
@@ -103,6 +103,7 @@ class Keys:
 
 class Compiler:
     def __init__(self, book: Book):
+        add_arrays(book)
         self.book = book
         self.done: dict[Key, tuple[str, bool]] = {}  # formula cell in a closed batch -> (type, may be an error)
         self.open: dict[Key, tuple[str, str, bool]] = {}  # formula cell in the open batch -> (cte, type, may err)
@@ -124,6 +125,8 @@ class Compiler:
     def _intersect(self, area, text: str) -> Expr:
         """A range where one value is expected: Excel's implicit intersection takes the cell in the formula's own row
         (a one-column range) or column (a one-row range), and is #VALUE! when there is none."""
+        if area.sheet in self.book.arrays:
+            raise Unsupported("array constant used where one value is expected (needs array evaluation) not supported yet")
         if self.at is None or area.sheet != self.at[0] or (area.r1 != area.r2 and area.c1 != area.c2):
             raise Unsupported(f"range {text} used as a single value")
         # real Excel: in MAX(IF(c, A1:A9, 0)) IF hands MAX the whole range; only an operator, a function's own
@@ -277,6 +280,24 @@ class Compiler:
         return self.done[key][1] if cell.formula is not None else cell.kind == "e"
 
 
+def add_arrays(book: Book) -> None:
+    """The values of the book's array constants as cells of their hidden sheets (see parser.ARRAY_SHEET)."""
+    for cell in list(book.cells.values()):
+        if cell.formula is None or "{" not in cell.formula:
+            continue
+        try:
+            names = set(arrays(parse(cell.formula)))
+        except (Unsupported, RecursionError):
+            continue
+        for name in names - book.arrays:
+            book.arrays.add(name)
+            for r, row in enumerate(ARRAYS[name], 1):
+                for c, (kind, value) in enumerate(row, 1):
+                    book.cells[(name, r, c)] = Cell(name, r, c, None, value, kind)
+            book.max_row[name] = len(ARRAYS[name])
+            book.__dict__.pop("_rows_by_col", None)  # cached from the cells
+
+
 def _finish(comp: Compiler, batches: list, batch) -> None:
     """A batch is finished: later cells read its results from the table. `batch` is a list of Steps or a region batch."""
     batches.append(batch)
@@ -299,6 +320,7 @@ def compile_book(book: Book, regions: bool = True) -> Compiled:
     from cellproof.region import compile_region, region_note
     from cellproof.regions import RegionScan, column_order, find_regions, order_with_regions
 
+    add_arrays(book)
     scan = find_regions(book) if regions else RegionScan([], [])
     order, unresolved, kept = order_with_regions(book, scan.regions)
     comp = Compiler(book)

@@ -451,6 +451,11 @@ TEXT_LOOKUPS = {
     "I": "=VLOOKUP(N{r},$K$1:$L$4,2)",  # approximate on sorted numbers
     "J": "=MATCH(N{r},$K$1:$K$4,1)",
     "M": "=XLOOKUP(N{r},$K$1:$K$4,$L$1:$L$4,-1,1)",  # next larger
+    "O": "=LOOKUP(N{r},$K$1:$K$4,$L$1:$L$4)",
+    "P": "=LOOKUP(N{r},$K$1:$L$4)",  # array form: last column
+    "Q": '=MATCH(A{r},{{"apple","pear","kiwi"}},0)',  # array constants ({{ }} for str.format)
+    "R": '=LOOKUP(N{r},{{0,10,20}},{{"low","mid","high"}})',
+    "S": "=N{r}*SUM({{1,2;3,4}})",
 }
 
 

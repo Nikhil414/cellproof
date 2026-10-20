@@ -45,3 +45,32 @@ def test_vlookup_exact_with_header_row_and_missing_key():
     # Region, West, South is not in order, so Excel's approximate match depends on its binary search: not guessed
     assert "ascending sorted" in c.unresolved[("X", 3, 2)]
     assert c.unresolved[("X", 4, 2)] == "VLOOKUP column index outside the table"
+
+
+def test_lookup_vector_form_largest_value_not_above():
+    grid = {"A1": 1, "A2": 3, "A3": 3, "A4": 7, "B1": "one", "B2": "three", "B3": "THREE", "B4": "seven",
+            "D1": 10, "E1": 30, "F1": 30, "G1": 70}
+    got, c = run({"S": grid, "X": {
+        "A1": ("=LOOKUP(5, S!A1:A4, S!B1:B4)", "THREE"),   # last of equal values, as Excel's binary search
+        "A2": ("=LOOKUP(0, S!A1:A4, S!B1:B4)", "#N/A"),    # smaller than every value
+        "A3": ("=LOOKUP(99, S!A1:A4)", 7),                 # no result vector: the value found
+        "A4": ("=LOOKUP(4, S!A1:A4, S!D1:G1)", 30),        # result vector in the other direction
+    }})
+    assert c.unresolved == {}
+    assert got[("X", 1, 1)] == ("s", None, "THREE")
+    assert got[("X", 2, 1)] == ("e", None, "#N/A")
+    assert got[("X", 3, 1)] == ("n", 7.0, None)
+    assert got[("X", 4, 1)] == ("n", 30.0, None)
+
+
+def test_lookup_array_form_and_refusals():
+    wide = {"A1": "a", "B1": "b", "C1": "c", "A2": 1, "B2": 2, "C2": 3,
+            "E1": 1, "E2": 5, "E3": 2, "F1": 10}
+    got, c = run({"S": wide, "X": {
+        "A1": ('=LOOKUP("B", S!A1:C2)', 2),                 # wider than tall: first row searched, last row returned
+        "A2": ("=LOOKUP(3, S!E1:E3, S!F1:F3)", 0),          # unsorted: Excel's answer depends on its search
+        "A3": ("=LOOKUP(1, S!E1:E2, S!F1:F3)", 10),         # result vector of another size
+    }})
+    assert got[("X", 1, 1)] == ("n", 2.0, None)
+    assert "ascending sorted" in c.unresolved[("X", 2, 1)]
+    assert "same size" in c.unresolved[("X", 3, 1)]

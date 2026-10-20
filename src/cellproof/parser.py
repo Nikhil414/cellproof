@@ -1,10 +1,12 @@
 """Excel formula text -> small AST. Pratt parser over openpyxl's tokenizer."""
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Iterator, Union
 
 from openpyxl.formula.tokenizer import Token, Tokenizer, TokenizerError
+from openpyxl.utils import get_column_letter
 
 from cellproof.model import Unsupported
 
@@ -61,6 +63,11 @@ class Call:
 
 Node = Union[Num, Str, Bool, ErrLit, RefNode, Unary, Postfix, Binary, Call]
 
+# An array constant ({1,2;3,4}) becomes a reference to a hidden sheet holding its values, so every function that takes a
+# range takes it unchanged. The compiler adds those cells to the book (see add_arrays); used as one value it is refused.
+ARRAY_SHEET = "#array-"
+ARRAYS: dict[str, tuple[tuple[tuple[str, object], ...], ...]] = {}  # hidden sheet -> rows of (kind, value)
+
 # Excel precedence, low -> high. Unary minus binds tighter than ^, so -2^2 = 4.
 BINARY = {"=": 1, "<>": 1, "<": 1, ">": 1, "<=": 1, ">=": 1, "&": 2, "+": 3, "-": 3, "*": 4, "/": 4, "^": 5}
 PREFIX = 6
@@ -85,19 +92,36 @@ def _fixed_reference(args) -> bool:
             and (len(args) == 1 or (isinstance(args[1], Bool) and args[1].value)))
 
 
-def refs(node) -> Iterator[str]:
-    """Every reference text in the tree, left to right."""
+def _refs(node) -> Iterator[str]:
     if isinstance(node, RefNode):
         yield node.text
     elif isinstance(node, (Unary, Postfix)):
-        yield from refs(node.operand)
+        yield from _refs(node.operand)
     elif isinstance(node, Binary):
-        yield from refs(node.left)
-        yield from refs(node.right)
+        yield from _refs(node.left)
+        yield from _refs(node.right)
     elif isinstance(node, Call):
         for arg in node.args:
             if arg is not None:
-                yield from refs(arg)
+                yield from _refs(arg)
+
+
+def _array(text: str) -> str | None:
+    """The hidden sheet of an array constant's reference, else None (a real sheet may share the prefix)."""
+    if not text.startswith("'" + ARRAY_SHEET):
+        return None
+    name = text[1:text.find("'!")]
+    return name if name in ARRAYS else None
+
+
+def refs(node) -> Iterator[str]:
+    """Every reference text in the tree, left to right; array constants are constants, not dependencies."""
+    return (t for t in _refs(node) if _array(t) is None)
+
+
+def arrays(node) -> Iterator[str]:
+    """The hidden sheet of every array constant in the tree."""
+    return (name for t in _refs(node) if (name := _array(t)) is not None)
 
 
 class _Parser:
@@ -159,6 +183,8 @@ class _Parser:
             return inner
         if tok.type == Token.FUNC and tok.subtype == Token.OPEN:
             return self.call(tok.value[:-1].upper().removeprefix("_XLFN."))
+        if tok.type == Token.ARRAY and tok.subtype == Token.OPEN:
+            return self.array()
         raise Unsupported(f"unexpected {tok.value!r} in formula")
 
     def call(self, name):
@@ -178,3 +204,40 @@ class _Parser:
                 return Call(name, tuple(args))
             if not (tok.type == Token.SEP and tok.subtype == Token.ARG):
                 raise Unsupported(f"unexpected {tok.value!r} in {name}()")
+
+    def array(self):
+        rows, row = [], []
+        while True:
+            tok = self.take()
+            sign = 1
+            if tok.type == Token.OP_PRE and tok.value in "+-":
+                sign, tok = (-1 if tok.value == "-" else 1), self.take()
+            if tok.type != Token.OPERAND or tok.subtype == Token.RANGE or (sign != 1 and tok.subtype != Token.NUMBER):
+                raise Unsupported(f"unexpected {tok.value!r} in array constant")
+            if tok.subtype == Token.NUMBER:
+                row.append(("n", sign * float(tok.value)))
+            elif tok.subtype == Token.TEXT:
+                if tok.value == '""':  # the cells table cannot tell empty text from no text
+                    raise Unsupported("array constant holding empty text \"\"")
+                row.append(("s", tok.value[1:-1].replace('""', '"')))
+            elif tok.subtype == Token.LOGICAL:
+                row.append(("b", tok.value.upper() == "TRUE"))
+            else:
+                row.append(("e", tok.value.upper()))
+            sep = self.take()
+            if sep.type == Token.SEP and sep.subtype == Token.ARG:
+                continue
+            rows.append(tuple(row))
+            row = []
+            if sep.type == Token.SEP and sep.subtype == Token.ROW:
+                continue
+            if sep.type == Token.ARRAY and sep.subtype == Token.CLOSE:
+                break
+            raise Unsupported(f"unexpected {sep.value!r} in array constant")
+        if len({len(r) for r in rows}) != 1:
+            raise Unsupported("array constant with rows of different lengths")
+        values = tuple(rows)
+        name = ARRAY_SHEET + hashlib.sha1(repr(values).encode()).hexdigest()[:16]
+        ARRAYS[name] = values
+        end = get_column_letter(len(values[0])) + str(len(values))
+        return RefNode(f"'{name}'!A1" + ("" if end == "A1" else f":{end}"))

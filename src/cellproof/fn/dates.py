@@ -1,4 +1,4 @@
-"""DATE, YEAR, MONTH, DAY, WEEKDAY, DAYS, EDATE, EOMONTH, DAYS360, DATEDIF, and TEXT's date formats.
+"""DATE, YEAR, MONTH, DAY, WEEKDAY, DAYS, EDATE, EOMONTH, DAYS360, YEARFRAC, DATEDIF, and TEXT's date formats.
 
 Excel stores a date as a serial number: 1 = 1900-01-01, and it counts a 29 February 1900 that never existed
 (serial 60), so serials from 61 on are days since 1899-12-30. Serial 0 is "1900-01-00". Workbooks using the
@@ -6,7 +6,7 @@ Excel stores a date as a serial number: 1 = 1900-01-01, and it counts a 29 Febru
 """
 from __future__ import annotations
 
-from cellproof.expr import Expr, errs, num, num_strict
+from cellproof.expr import EARLY1900, NO_ERR, Expr, errs, num, num_strict
 from cellproof.fn.lookup import int_literal
 from cellproof.fn.text import FORMATS
 from cellproof.functions import arity, register
@@ -139,6 +139,56 @@ def days360(c, args, sheet):
         m2 = f"({m2} + CASE WHEN {end_last} AND {day1} < 30 THEN 1 ELSE 0 END)"
     sql = f"CAST(({y2} - {y1}) * 360 + ({m2} - {m1}) * 30 + ({day2} - {day1}) AS DOUBLE)"
     return Expr(f"(CASE WHEN {_ok(a)} AND {_ok(b)} THEN {sql} END)", "num", errs(a.err, b.err))
+
+
+def _leap(y: str) -> str:
+    return f"(({y}) % 4 = 0 AND (({y}) % 100 <> 0 OR ({y}) % 400 = 0))"
+
+
+@register("YEARFRAC")
+def yearfrac(c, args, sheet):
+    """The day counts as Excel computes them (D. A. Wheeler's analysis of Excel's YEARFRAC, which matches it on every
+    pair of dates he tried); dates in either order."""
+    arity("YEARFRAC", args, 2, 3)
+    a, b = _serial(c, args[0], sheet, strict=True), _serial(c, args[1], sheet, strict=True)
+    lo, hi = f"least({a.sql}, {b.sql})", f"greatest({a.sql}, {b.sql})"
+    d1, d2 = to_date(lo), to_date(hi)
+    y1, m1, dd1, y2, m2, dd2 = (f"{f}({d})" for d in (d1, d2) for f in ("year", "month", "day"))
+    days = f"({hi} - {lo})"
+
+    def frac(basis: int) -> str:
+        if basis in (0, 4):
+            if basis == 4:
+                day1, day2 = f"least({dd1}, 30)", f"least({dd2}, 30)"
+            else:  # U.S. 30/360: unlike DAYS360, a 31st end stays 31 unless the start is the 30th or 31st
+                feb1, feb2 = f"({m1} = 2 AND {d1} = last_day({d1}))", f"({m2} = 2 AND {d2} = last_day({d2}))"
+                day1 = f"(CASE WHEN {dd1} = 31 OR {feb1} THEN 30 ELSE {dd1} END)"
+                day2 = (f"(CASE WHEN {dd2} = 31 AND {dd1} >= 30 THEN 30 WHEN {dd1} < 30 AND {feb1} AND {feb2} THEN 30 "
+                        f"ELSE {dd2} END)")
+            return f"((({y2}) - ({y1})) * 360 + (({m2}) - ({m1})) * 30 + ({day2} - {day1})) / 360.0"
+        if basis == 1:  # actual/actual
+            within = f"({y1} = {y2} OR ({y1} + 1 = {y2} AND ({m1} > {m2} OR ({m1} = {m2} AND {dd1} >= {dd2}))))"
+            mar1, mar2 = f"make_date({y1}, 3, 1)", f"make_date({y2}, 3, 1)"
+            feb29 = (f"(({_leap(y1)} AND {d1} < {mar1} AND {d2} >= {mar1}) OR ({_leap(y2)} AND {d2} >= {mar2} AND "
+                     f"{d1} < {mar2}) OR ({m2} = 2 AND {dd2} = 29))")
+            year = f"(CASE WHEN ({y1} = {y2} AND {_leap(y1)}) OR {feb29} THEN 366.0 ELSE 365.0 END)"
+            average = f"((make_date({y2} + 1, 1, 1) - make_date({y1}, 1, 1)) / ({y2} - {y1} + 1.0))"
+            return f"(CASE WHEN {within} THEN {days} / {year} ELSE {days} / {average} END)"
+        return f"({days} / {360.0 if basis == 2 else 365.0})"
+
+    literal = 0 if len(args) == 2 or args[2] is None else int_literal(args[2])
+    if literal is not None:
+        if literal not in range(5):
+            return Expr("NULL", "num", "'#NUM!'")
+        sql, bad = frac(literal), NO_ERR
+    else:  # a basis computed at run time: truncated, #NUM! outside 0-4. Real Excel checks it before the dates
+        basis = num_strict(c.expr(args[2], sheet))
+        n = f"trunc({basis.sql})"
+        sql = "(CASE " + " ".join(f"WHEN {n} = {i} THEN {frac(i)}" for i in range(5)) + " END)"
+        bad = errs(basis.err, f"(CASE WHEN {n} NOT BETWEEN 0 AND 4 THEN '#NUM!' END)")
+    ok = f"({_ok(a)} AND {_ok(b)} AND ({bad}) IS NULL AND {lo} >= 61)"
+    return Expr(f"(CASE WHEN {ok} THEN CAST({sql} AS DOUBLE) END)", "num",
+                errs(bad, a.err, b.err, f"(CASE WHEN {lo} < 61 THEN '{EARLY1900}' END)"))
 
 
 @register("DATEDIF")

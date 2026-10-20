@@ -16,7 +16,9 @@ LOCALE_REASON = ("reads text as a number, date or time (like \"1/2/2020\" or \"1
                  "computer's language settings, which the file does not record")
 PLATFORM = "#PLATFORM"  # not an Excel error either: Excel for Mac answers differently (CHAR above 127)
 PLATFORM_REASON = "CHAR above 127 gives a different character in Excel for Mac, which last calculated this file"
-SETTINGS = {LOCALE: LOCALE_REASON, PLATFORM: PLATFORM_REASON}  # markers the verifier reports as UNRESOLVED
+EARLY1900 = "#1900"  # nor this: a date before 1 March 1900, where Excel counts a 29 February that never existed
+EARLY1900_REASON = "YEARFRAC of a date before 1 March 1900, around Excel's 29 February 1900 that never existed"
+SETTINGS = {LOCALE: LOCALE_REASON, PLATFORM: PLATFORM_REASON, EARLY1900: EARLY1900_REASON}  # reported as UNRESOLVED
 Type = Literal["num", "txt", "bool", "blank", "err", "any"]
 
 

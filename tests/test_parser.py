@@ -25,7 +25,7 @@ def test_functions_and_empty_args():
     assert parse("NOW()") == Call("NOW", ())
 
 
-@pytest.mark.parametrize("bad", ["SUM(1,", "{1,2}", "A1:B2 B1:C3", "(1+2"])
+@pytest.mark.parametrize("bad", ["SUM(1,", "{1,A1}", "A1:B2 B1:C3", "(1+2"])
 def test_unparseable_raises_unsupported(bad):
     with pytest.raises(Unsupported):
         parse(bad)

@@ -227,3 +227,14 @@ def test_dbt_build_with_colliding_region_names(tmp_path):
     wb = tmp_path / "c.xlsx"
     write_xlsx(wb, {"My Sheet": _sheet(), "My_Sheet": _sheet()})
     assert main(["convert", str(wb), "--out", str(tmp_path / "out"), "--dbt"]) == 0
+
+
+def test_array_constants_reach_the_dbt_models(tmp_path):
+    spec = {"A1": ('=MATCH("b",{"a","b"},0)', 2.0)}
+    spec.update({f"B{r}": (f"=LOOKUP({r},{{0,3,6}},{{10,20,30}})", 0.0) for r in range(1, 9)})
+    book = book_of({"S": spec})
+    compiled = compile_book(book)
+    assert compiled.unresolved == {}
+    write_project(book, compiled, tmp_path, "arrays")
+    got = {(s, r, c): (k, n, t) for s, r, c, k, n, t in _run_models(tmp_path)}
+    assert got == execute(book, compiled)

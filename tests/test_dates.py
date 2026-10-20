@@ -41,3 +41,29 @@ def test_1904_workbooks_and_odd_forms_say_why():
     assert compile_book(other).unresolved == {
         ("S", 1, 1): 'DATEDIF unit must be "Y", "M" or "D" written in the formula',
         ("S", 2, 1): "WEEKDAY return type must be 1, 2 or 3"}
+
+
+YEARFRAC = [  # Microsoft's documented examples, then the basis rules
+    ("=YEARFRAC(DATE(2012,1,1), DATE(2012,7,30))", 0.58055556), ("=YEARFRAC(DATE(2012,1,1), DATE(2012,7,30), 1)", 0.57650273),
+    ("=YEARFRAC(DATE(2012,1,1), DATE(2012,7,30), 3)", 0.57808219), ("=YEARFRAC(DATE(2012,7,30), DATE(2012,1,1), 2)", 211 / 360),
+    ("=YEARFRAC(DATE(2011,1,31), DATE(2011,3,31), 4)", 60 / 360),
+    ("=YEARFRAC(DATE(2011,6,1), DATE(2012,3,1), 1)", 274 / 366), ("=YEARFRAC(DATE(2011,1,1), DATE(2013,1,1), 1)", 731 / (1096 / 3)),
+    ("=YEARFRAC(DATE(2026,1,1), DATE(2026,7,1), 5)", "#NUM!"), ("=YEARFRAC(-1, 5)", "#NUM!"), ("=YEARFRAC(DATE(2012,1,1), DATE(2012,7,30), B2)", 0.57650273),
+    ("=YEARFRAC(DATE(2012,1,1), DATE(2012,7,30), B3)", "#NUM!"), ("=YEARFRAC(1/0, 100, B3)", "#NUM!"),
+    ("=YEARFRAC(-1, 100, TRUE)", "#VALUE!"), ("=YEARFRAC(1/0, 100, 7)", "#NUM!"),
+]
+
+
+def test_yearfrac():
+    book = book_of({"S": {f"A{i}": (f, v) for i, (f, v) in enumerate(YEARFRAC, 1)} | {"B1": ("=YEARFRAC(10, 100)", 0.25), "B2": 1.9, "B3": 5}})
+    compiled = compile_book(book)
+    got = execute(book, compiled)
+    assert ("S", 1, 2) not in compiled.unresolved
+    for i, (formula, want) in enumerate(YEARFRAC, 1):
+        kind, n, t = got[("S", i, 1)]
+        if isinstance(want, str):
+            assert (kind, t) == ("e", want), formula
+        else:
+            assert kind == "n" and abs(n - want) < 5e-9, (formula, n, want)
+    # serials before 1 March 1900 cross Excel's 29 February 1900 that never existed: not guessed
+    assert got[("S", 1, 2)][0] == "e" and got[("S", 1, 2)][2] == "#1900"

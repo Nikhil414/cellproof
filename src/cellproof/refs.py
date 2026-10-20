@@ -47,7 +47,7 @@ def resolve(text: str, sheet: str, book: Book) -> Area:
             raise Unsupported(f"external link {text}")
     elif ref.upper() in book.names:
         sheet, ref = book.names[ref.upper()]
-    if sheet not in book.sheets:
+    if sheet not in book.sheets and sheet not in book.arrays:
         raise Unsupported(f"unknown sheet {sheet!r}")
     try:
         if ":" not in ref and not any(ch.isdigit() for ch in ref):

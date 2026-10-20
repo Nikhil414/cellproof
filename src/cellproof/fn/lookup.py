@@ -1,4 +1,4 @@
-"""VLOOKUP, HLOOKUP, MATCH, INDEX, XLOOKUP, CHOOSE.
+"""VLOOKUP, HLOOKUP, MATCH, INDEX, XLOOKUP, LOOKUP, CHOOSE.
 
 The value found is read from the cells table. Its type comes from the cells the range holds: one type ->
 that type; mixed, or text with empty cells -> 'any' (known when the SQL runs). An empty cell found reads
@@ -254,6 +254,34 @@ def xlookup(c, args, sheet):
         return f"(CASE WHEN {hit_sql} THEN {a} ELSE {b} END)"
     return Expr(case(found.sql, missing.sql), found.type, errs(x.err, pick_err), case(found.txt, missing.txt),
                 case(found.kind, missing.kind))
+
+
+@register("LOOKUP")
+def lookup(c, args, sheet):
+    """Always approximate: the largest value <= x. Vector form searches args[1] and returns the cell at the same
+    position of args[2] (either direction); array form searches the first row of a block wider than tall, else its
+    first column, and returns the last row or column."""
+    arity("LOOKUP", args, 2, 3)
+    if len(args) == 3 and args[2] is not None:
+        look, back = _line(c, args[1], sheet, "LOOKUP"), _line(c, args[2], sheet, "LOOKUP")
+        if len(list(look.cells())) != len(list(back.cells())):
+            raise Unsupported("LOOKUP result range must be the same size as the lookup range")
+    else:
+        area, _ = _area(c, args[1], sheet, "LOOKUP")
+        if area.c2 - area.c1 > area.r2 - area.r1:
+            look = Area(area.sheet, area.r1, area.c1, area.r1, area.c2)
+            back = Area(area.sheet, area.r2, area.c1, area.r2, area.c2)
+        else:
+            look = Area(area.sheet, area.r1, area.c1, area.r2, area.c1)
+            back = Area(area.sheet, area.r1, area.c2, area.r2, area.c2)
+    x = _xlookup_x(c, args, sheet)
+    _require_sorted(c, look, False, "LOOKUP")
+    step = f"k.row_num - {look.r1}" if look.c1 == look.c2 else f"k.col_num - {look.c1}"
+    hit = (f"r.col_num = {back.c1} AND r.row_num = {back.r1} + {step}" if back.c1 == back.c2
+           else f"r.row_num = {back.r1} AND r.col_num = {back.c1} + {step}")
+    search = Search(x, look, "le", wild=False, back=(lit_str(back.sheet).sql, hit))
+    keys = c.ready(back)
+    return _read(search.pick, _type_of(c, back, keys), errs(x.err, _found_error(search.pick, "#N/A")))
 
 
 @register("INDEX")

@@ -46,6 +46,7 @@ class Book:
     max_row: dict[str, int] = field(default_factory=dict)
     date1904: bool = False  # the workbook counts dates from 1904 (old Mac Excel)
     app: str = ""  # the program that last saved the file (docProps/app.xml), "" when the file does not say
+    arrays: set[str] = field(default_factory=set)  # hidden sheets of array constants (cellproof.parser.ARRAY_SHEET)
 
     @cached_property
     def _rows_by_col(self) -> dict[tuple[str, int], list[int]]:
