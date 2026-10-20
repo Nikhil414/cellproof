@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 (2026-10-20)
 
 Found by running all 85 public test workbooks of pycel, formulas and xlcalculator (`python tests/corpus.py DIR`):
 FAIL 229 -> 10 (all 10 in files LibreOffice saved, which the report now says), no crashes.

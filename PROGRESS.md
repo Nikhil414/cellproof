@@ -1,6 +1,6 @@
 # cellproof: progress
 
-Last updated: 2026-10-19.
+Last updated: 2026-10-20.
 
 ## State
 
@@ -16,11 +16,13 @@ Everything below is on `main`, built test-first, each piece reviewed by a fresh 
 | Slice 2 | a region with a cell between its columns splits instead of dissolving; running totals (`=C1+B2`, `=SUM($B$2:B2)`) become window functions |
 | Lookups row-wise | VLOOKUP, HLOOKUP, MATCH, INDEX, XLOOKUP pasted down compile into the region's statement (one join each instead of one query per cell) |
 | Tokenize once | a formula pasted down a column is tokenized once; the next rows' text is predicted and only re-tokenized when it differs |
+| Implicit intersection | a one-column range where one value is expected takes the formula's row; `INDIRECT` of fixed text; MODE (found in a user's workbook) |
 | Criteria row-wise | the *IF(S) family with a criterion from the row (`=COUNTIFS($E:$E,">"&A2,...)`) compiles into the region's statement too |
 | Open source | MIT license, README with limits, SECURITY.md, CI on Windows/macOS/Linux x Python 3.10-3.13 |
 
-Tests: about 370 (dbt build included), plus 3 workbooks saved by real Excel that all PASS (4 cells UNRESOLVED on
-purpose). Public on GitHub (one-commit history start). 0.1.0 was released as `unexcel`; 0.2.0 is on PyPI as `cellproof` (2026-10-19, see CHANGELOG.md).
+Tests: about 425 (dbt build included), plus 3 workbooks saved by real Excel that all PASS (4 cells UNRESOLVED on
+purpose). Public on GitHub (one-commit history start). 0.1.0 was released as `unexcel`; 0.2.0 (2026-10-19) and 0.2.1 (2026-10-20) are on PyPI as `cellproof` (see CHANGELOG.md).
+A user's practice workbook: 3 PASS / 47 UNRESOLVED -> 48 PASS / 0 FAIL / 2 UNRESOLVED.
 
 ## Public test workbooks (2026-10-19)
 
@@ -78,6 +80,8 @@ What Excel taught us (each has a test in `tests/test_excel_findings.py`):
 
 ## Next
 
-1. Read time (openpyxl loads the workbook twice) and the per-cell dependency loop.
-2. Plan 3: AI retry loop for failed cells (it sees formula structure only, never values).
-3. Test on real analyst workbooks.
+1. Close the UNRESOLVED gaps business workbooks hit: LOOKUP, YEARFRAC, array constants (`{1,2,3}`), simple array
+   formulas (`SUM(A1:A10*B1:B10)`, `MAX(IF(...))`).
+2. Test on more real analyst workbooks (one user workbook found 4 gaps the 85 public files did not).
+3. Read time (openpyxl loads the workbook twice) and the per-cell dependency loop.
+4. Plan 3: AI retry loop for failed cells (it sees formula structure only, never values).
