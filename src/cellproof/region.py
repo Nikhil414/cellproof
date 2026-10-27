@@ -188,7 +188,7 @@ def source_info(comp: Compiler, region: Region, col: int) -> tuple[str, bool]:
             types.add({"n": "num", "s": "txt", "b": "bool"}[cell.kind])
         else:
             if key not in comp.done:
-                raise Unsupported(f"depends on unresolved cell {a1(key)}")
+                raise Unsupported(f"depends on unresolved cell {a1(key)}", key)
             typ, err = comp.done[key]
             types.add(typ)
             may = may or err

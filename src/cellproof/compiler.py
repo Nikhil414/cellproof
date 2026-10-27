@@ -71,6 +71,7 @@ class Compiled:
     unresolved: dict[Key, str]
     findings: list[str]
     notes: list[str] = dc_field(default_factory=list)
+    chains: dict[Key, Key] = dc_field(default_factory=dict)  # cell -> the unresolved cell that stopped its compile
 
     @property
     def steps(self) -> list[Step]:
@@ -112,10 +113,15 @@ class Compiler:
         self.rowrefs: dict[str, Expr] | None = None  # same-row placeholders of a region (see regions)
         self.at: Key | None = None  # the formula cell being compiled in cell mode (implicit intersection)
         self.ctx: list[str] = []  # what consumes the node being compiled: "op", "fn" or "pass" (PASS_THROUGH)
+        self.wid = 0  # unique aliases w1, w2... for the element sources of one array argument
+
+    def walias(self) -> str:
+        self.wid += 1
+        return f"w{self.wid}"
 
     def compile_cell(self, cell: Cell) -> Expr:
-        if cell.array:
-            raise Unsupported("array formula")
+        if cell.array and cell.ref and ":" in cell.ref:
+            raise Unsupported("array formula over several cells")  # spilling into the neighbours is not read yet
         self.at = cell.key
         try:
             return finalize(self.expr(parse(cell.formula), cell.sheet))
@@ -238,7 +244,7 @@ class Compiler:
         elif key in self.done:
             typ, may_err = self.done[key]
         else:
-            raise Unsupported(f"depends on unresolved cell {a1(key)}")
+            raise Unsupported(f"depends on unresolved cell {a1(key)}", key)
         where = f"FROM {CELLS} WHERE {where_cell(key)}"
         err = f"(SELECT CASE WHEN kind = 'e' THEN txt END {where})" if may_err else NO_ERR
         if typ == "num":
@@ -266,7 +272,7 @@ class Compiler:
             if key in self.open:
                 raise NewBatch
             if key not in self.done:
-                raise Unsupported(f"depends on unresolved cell {a1(key)}")
+                raise Unsupported(f"depends on unresolved cell {a1(key)}", key)
         raise AssertionError("range index is out of step with the compiler")
 
     def kind_of(self, key: Key) -> str:
@@ -324,6 +330,7 @@ def compile_book(book: Book, regions: bool = True) -> Compiled:
     scan = find_regions(book) if regions else RegionScan([], [])
     order, unresolved, kept = order_with_regions(book, scan.regions)
     comp = Compiler(book)
+    chains: dict[Key, Key] = {}  # cell -> the unresolved cell that stopped its compile (see impact.py)
     if book.app and not (book.app.startswith("Microsoft") and "Compatible" not in book.app):  # openpyxl: "Compatible"
         comp.findings.append(f"the file was last saved by {book.app}, not Microsoft Excel: its saved values follow that "
                              "program's rules, so a FAIL can be a difference between that program and Excel")
@@ -369,6 +376,8 @@ def compile_book(book: Book, regions: bool = True) -> Compiled:
                 e = comp.compile_cell(cell)  # the open batch is empty now, so this can't raise NewBatch
         except Unsupported as err:
             unresolved[key] = str(err)
+            if err.dep is not None:
+                chains[key] = err.dep
             return
         except RecursionError:  # Python's stack, not DuckDB's: DuckDB took 900 nesting levels in tests
             unresolved[key] = DEEP
@@ -402,7 +411,7 @@ def compile_book(book: Book, regions: bool = True) -> Compiled:
                 for row in range(region.r1, region.r2 + 1):
                     add((region.sheet, row, col))
     _close(comp, batches, current)
-    return Compiled(batches, unresolved, comp.findings, notes)
+    return Compiled(batches, unresolved, comp.findings, notes, chains)
 
 
 def cell_row(typ: str, v: str, e: str, t: str, k: str) -> tuple[str, str, str]:

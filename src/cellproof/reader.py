@@ -132,10 +132,10 @@ def load(path: str | Path) -> Book:
             if c.value is None:
                 continue
             value, kind = _saved(vws.cell(row=r, column=col), fwb.epoch)
-            formula, array = None, False
+            formula, array, ref = None, False, None
             if isinstance(c.value, ArrayFormula):
-                formula, array = (c.value.text or "").removeprefix("="), True
+                formula, array, ref = (c.value.text or "").removeprefix("="), True, c.value.ref
             elif c.data_type == "f":
                 formula = c.value.removeprefix("=")
-            cells[(ws.title, c.row, c.column)] = Cell(ws.title, c.row, c.column, formula, value, kind, array)
+            cells[(ws.title, c.row, c.column)] = Cell(ws.title, c.row, c.column, formula, value, kind, array, ref)
     return Book(cells, [ws.title for ws in fwb.worksheets], names, max_row, fwb.epoch == CALENDAR_MAC_1904, app)

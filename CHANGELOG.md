@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- **Array arithmetic in aggregates**, the first slice of array evaluation: `SUM(A1:A10*B1:B10)`,
+  `SUMPRODUCT((A1:A9>5)*C1:C9)`, `MAX(A1:A9-1)` and friends evaluate element by element like modern Excel - an
+  empty element is 0, a text one #VALUE!, the first error wins. SUM, SUMPRODUCT, MAX, MIN, AVERAGE, COUNT, COUNTA
+  and PRODUCT take arrays; comparisons inside arrays need numeric columns so far. A single-cell array formula
+  (Ctrl+Shift+Enter) now compiles; one over several cells is UNRESOLVED. Plain-entered range arithmetic as an
+  aggregate argument now follows modern Excel (the element-wise answer), not the legacy first-row intersection.
+- **Approximate lookups on unsorted data** (MATCH type 1, VLOOKUP/HLOOKUP approximate, LOOKUP) over a plain numeric
+  input table: cellproof now compiles Excel's binary-search path itself - the answer is the last probe the search
+  moves right from, not the sorted bracket, and it matches Excel's own answers on files we checked (the 9.99E+307
+  last-number trick included). The SQL refuses table values that changed after translation (#STALE, UNRESOLVED)
+  instead of answering from a stale search. MATCH type -1, text, and tables with empty cells or formulas stay
+  UNRESOLVED: Excel's answer there is not derivable from the file.
+- **Where to start:** the report groups the unresolved cells by the reason to fix first and ranks the reasons by
+  reach: a cell that reads an unresolved cell is attributed to the reason above it, so the top row of
+  "Where to start" names the fix that lets the most cells try again. report.json gains `unresolved_groups` and a
+  `blocked_by` root per unresolved cell.
+
 ## 0.2.2 (2026-10-27)
 
 - **LOOKUP** (vector and array form). Like the other approximate lookups, UNRESOLVED on data out of order.

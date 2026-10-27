@@ -68,9 +68,9 @@ def test_lookup_array_form_and_refusals():
             "E1": 1, "E2": 5, "E3": 2, "F1": 10}
     got, c = run({"S": wide, "X": {
         "A1": ('=LOOKUP("B", S!A1:C2)', 2),                 # wider than tall: first row searched, last row returned
-        "A2": ("=LOOKUP(3, S!E1:E3, S!F1:F3)", 0),          # unsorted: Excel's answer depends on its search
+        "A2": ("=LOOKUP(3, S!E1:E3, S!F1:F3)", 10),         # unsorted: Excel's search probes 5 (go left), then 1 -> F1
         "A3": ("=LOOKUP(1, S!E1:E2, S!F1:F3)", 10),         # result vector of another size
     }})
     assert got[("X", 1, 1)] == ("n", 2.0, None)
-    assert "ascending sorted" in c.unresolved[("X", 2, 1)]
+    assert got[("X", 2, 1)] == ("n", 10.0, None)
     assert "same size" in c.unresolved[("X", 3, 1)]

@@ -49,7 +49,8 @@ The output folder holds:
 
 - **`REPORT.md` / `report.json`**: every verdict, failed cells with both values, unresolved cells with the reason,
   findings (for example a number stored as text, which Excel skips in SUM), and which blocks of rows became readable
-  table models.
+  table models. The unresolved reasons are ranked by how many cells depend on them ("Where to start"), so a long list
+  of unresolved cells says what to fix first.
 - **A dbt project** (`dbt_project.yml`, `models/`, `seeds/input_cells.csv`) that recomputes the workbook on DuckDB.
   It runs exactly the SQL the verifier checked.
 
@@ -92,17 +93,24 @@ COUNTIFS/SUMIFS with a criterion from the row run at the same speed.
 cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each reported with a reason:
 
 - **File formats:** `.xlsx` and `.xlsm` only (no `.xls`, `.xlsb`, `.ods`). Macros (VBA) are ignored.
-- **Array constants** (`{0,50,100}`) work wherever a range is taken (`SUM`, `MATCH`, `LOOKUP`, `VLOOKUP`, `INDEX`...);
-  where one value is expected (`A1*{1,2}`) they need array evaluation and are UNRESOLVED.
-- **Not supported:** array formulas and dynamic arrays, volatile functions (`NOW`, `TODAY`, `RAND`, `OFFSET`, and
+- **Array constants** (`{0,50,100}`) work wherever a range is taken (`SUM`, `MATCH`, `LOOKUP`, `VLOOKUP`, `INDEX`...)
+  and inside array arithmetic; where one value is expected (`A1*{1,2}`) they need array evaluation and are UNRESOLVED.
+- **Array arithmetic in aggregates** (`SUM(A1:A10*B1:B10)`, `SUMPRODUCT((A1:A9>5)*C1:C9)`, `MAX(A1:A9-1)`) follows
+  modern Excel: element by element, an empty element is 0, a text one #VALUE!, the first error wins. Comparisons
+  inside arrays need numeric columns so far. A single-cell array formula (Ctrl+Shift+Enter) compiles; an array
+  formula over several cells is UNRESOLVED (spilling is not read yet).
+- **Not supported:** multi-cell array formulas and dynamic arrays, volatile functions (`NOW`, `TODAY`, `RAND`, `OFFSET`, and
   `INDIRECT` of text built while the sheet runs; `INDIRECT("Sales")` is fine), functions outside the list above,
   external workbooks, structured table references (`Table1[@Col]`), INDEX used as a reference, the 1904 date system in
   TEXT date formats.
 - **Ranges where one value is expected** (`=IF(E$3:E$41="F",B$3:B$41)`) take the formula's own row or column, as
   Excel does (implicit intersection). A range that IF/IFERROR/CHOOSE hands to another function
   (`MAX(IF(c,A1:A9,0))`, where Excel uses the whole range) is UNRESOLVED.
-- **Approximate lookups on unsorted data** (LOOKUP, and MATCH/VLOOKUP/HLOOKUP with match type 1/-1): UNRESOLVED, because Excel's
-  answer then depends on its binary search.
+- **Approximate lookups on unsorted data** (LOOKUP, MATCH/VLOOKUP/HLOOKUP with match type 1): compiled for plain
+  numeric tables written as inputs (up to about 1,000 values): the SQL carries Excel's binary-search path itself, and
+  refuses changed table values instead of answering from a stale search. MATCH with type -1, text tables, tables with
+  empty cells or formulas, and bigger tables stay UNRESOLVED, because Excel's answer there is not derivable from the
+  file (LibreOffice, the only open source that emulates the search, provably differs from Excel in places).
 - **Text to number:** only plain numbers convert (`"3"`, `" -1.5e3 "`). Text Excel reads with the computer's language
   settings (`"1,000"`, `"$5"`, `"50%"`, `"1/2/2020"`, `"2:00 PM"`, `"Jan 5"`) makes the cell UNRESOLVED, because the
   file does not record those settings.

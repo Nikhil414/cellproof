@@ -6,11 +6,14 @@ as 0, like Excel. Exact matching of text ignores case and (except XLOOKUP's defa
 
 Every search is an aggregate (arg_min/arg_max by position) over a table that does not depend on the formula's row;
 only the WHERE does. DuckDB plans such a subquery as one join for a whole region, where ORDER BY ... LIMIT 1 or a
-LEFT JOIN on the row's values cannot be planned at all.
+LEFT JOIN on the row's values cannot be planned at all. Approximate matches on data in order are such an aggregate;
+on data out of order, Excel's answer is its binary-search path itself, compiled as such (Walk).
 """
 from __future__ import annotations
 
-from cellproof.expr import CELLS, NO_ERR, Expr, any_of, errs, lit_str, num, unify_all, where_area
+import math
+
+from cellproof.expr import CELLS, NO_ERR, STALE, Expr, any_of, errs, lit_str, num, unify_all, where_area
 from cellproof.fn.criteria import like_pattern
 from cellproof.functions import arity, register
 from cellproof.model import Unsupported
@@ -85,10 +88,9 @@ def _near(k: str, x: Expr, cmp: str) -> tuple[str, str]:
     raise Unsupported("approximate match on this kind of value not supported yet")
 
 
-def _require_sorted(c, line: Area, descending: bool, fname: str) -> None:
-    """Excel's approximate match is a binary search. On data that is not in order its answer depends on the search
-    path (real Excel: MATCH(150, {0,100,500}, -1) is #N/A although 500 >= 150), so cellproof refuses to guess.
-    The order is judged from the saved values, which the verifier then holds the computed values to."""
+def _line_values(c, line: Area, fname: str) -> list:
+    """The (kind, value) of the line's non-empty cells; Unsupported on an error or mixed kinds. Empty cells are
+    skipped, as Excel's aggregate skips them on data in order."""
     seen = []
     for key in line.cells():
         cell = c.book.cells.get(key)
@@ -99,10 +101,125 @@ def _require_sorted(c, line: Area, descending: bool, fname: str) -> None:
         seen.append((cell.kind, cell.value.lower() if isinstance(cell.value, str) else cell.value))
     if len({kind for kind, _ in seen}) > 1:
         raise Unsupported(f"{fname} approximate match over a range of mixed types")
-    values = [v for _, v in seen]
+    return seen
+
+
+def _require_sorted(c, line: Area, descending: bool, fname: str) -> None:
+    """Excel's approximate match is a binary search. On data that is not in order its answer depends on the search
+    path (real Excel: MATCH(150, {0,100,500}, -1) is #N/A although 500 >= 150), so cellproof refuses to guess.
+    The order is judged from the saved values, which the verifier then holds the computed values to."""
+    values = [v for _, v in _line_values(c, line, fname)]
     if not all(a >= b if descending else a <= b for a, b in zip(values, values[1:])):
         raise Unsupported(f"{fname} approximate match needs {'descending' if descending else 'ascending'} sorted data: "
                           "on unsorted data Excel's answer depends on its binary search")
+
+
+def _stale(found, err: str) -> str:
+    """A compiled search is valid only while the table holds the values it was compiled from (Walk.guard)."""
+    guard = getattr(found, "guard", None)
+    return f"(CASE WHEN {guard} THEN '{STALE}' ELSE {err} END)" if guard else err
+
+
+MAX_WALK_STATES = 1000  # the tree's SQL is inlined per pick: a few copies of ~60 characters per probe
+
+
+def _walk_states(numbers: list[float]) -> list[tuple]:
+    """The decision tree of Excel's bisection over the numbers, left to right: (depth, low, high, probe position
+    1-based, probed value). The interval [low, high) is the x-range whose search path reaches the probe; None is
+    unbounded. Every child's interval is strictly smaller, so the states form a tree, not a cycle."""
+    states, todo = {}, [(0, len(numbers) - 1, 1, None, None)]
+    while todo:
+        lo, hi, depth, ilo, ihi = todo.pop()
+        if lo > hi or (lo, hi) in states:
+            continue
+        mid = (lo + hi) // 2
+        states[(lo, hi)] = (depth, ilo, ihi, mid + 1, numbers[mid])
+        # a child's x-interval is the parent's narrowed by this branch: right means x >= the probed value,
+        # left means x < it; the other side's bound carries down
+        todo.append((mid + 1, hi, depth + 1,
+                     numbers[mid] if ilo is None else max(ilo, numbers[mid]), ihi))
+        todo.append((lo, mid - 1, depth + 1,
+                     ilo, numbers[mid] if ihi is None else min(ihi, numbers[mid])))
+    return list(states.values())
+
+
+class Walk:
+    """Excel's type-1 approximate match on data out of order: its binary search itself, compiled.
+
+    The search path is fixed by the table's input values (formulas or empty cells would change it, so they are
+    refused), so the bisection's decision tree is built here and the SQL answers with the deepest reached probe
+    whose value <= x - the last probe the search moves right from, which is Excel's answer. The SQL re-checks
+    every probed value against the saved one: a table that changed after translation is #STALE (UNRESOLVED by the
+    verifier), never a silently wrong number. Type -1 out of order is not emulated: Excel's answer there (real
+    Excel: MATCH(999, {0,1000,5000}, -1) is #N/A) is not derivable from the file, so it stays UNRESOLVED."""
+
+    def __init__(self, x: Expr, line: Area, states: list[tuple], back=None):
+        self._first = line.r1 if line.c1 == line.c2 else line.c1
+        self._col = "row_num" if line.c1 == line.c2 else "col_num"
+        self._other = f"col_num = {line.c1}" if line.c1 == line.c2 else f"row_num = {line.r1}"
+        self._sheet = lit_str(line.sheet).sql
+        rows = ", ".join(
+            f"({d}, {'CAST(NULL AS DOUBLE)' if ilo is None else f'CAST({ilo!r} AS DOUBLE)'}, "
+            f"{'CAST(NULL AS DOUBLE)' if ihi is None else f'CAST({ihi!r} AS DOUBLE)'}, {p}, CAST({v!r} AS DOUBLE))"
+            for d, ilo, ihi, p, v in states)
+        tree = f"(VALUES {rows}) t(d, ilo, ihi, p, v)"
+        reach = f"(t.ilo IS NULL OR {x.sql} >= t.ilo) AND (t.ihi IS NULL OR {x.sql} < t.ihi)"
+        join = (f"JOIN {CELLS} k ON k.sheet = {self._sheet} AND k.{self._col} = {self._first - 1} + t.p "
+                f"AND k.{self._other} AND k.kind = 'n'")
+        self.pos = f"(SELECT arg_max(t.p, t.d) FROM {tree} {join} WHERE {reach} AND k.num <= {x.sql})"
+        self.guard = (f"(SELECT count(*) FROM {tree} LEFT JOIN {CELLS} k ON k.sheet = {self._sheet} "
+                      f"AND k.{self._col} = {self._first - 1} + t.p AND k.{self._other} "
+                      f"WHERE k.kind IS DISTINCT FROM 'n' OR k.num IS DISTINCT FROM t.v) > 0")
+        self._hit = f"(EXISTS (SELECT 1 FROM {tree} {join} WHERE {reach} AND k.num <= {x.sql}))"
+        self.back = back
+
+    def pick(self, value: str, default: str | None = None) -> str:
+        if self.back is None:
+            return f"(SELECT {value})"  # MATCH reads the position itself
+        b0, b1 = self.back
+        src = (f"FROM (SELECT k.*, r.kind AS r_kind, r.num AS r_num, r.txt AS r_txt FROM {CELLS} k "
+               f"LEFT JOIN {CELLS} r ON r.sheet = {b0} AND {b1} "
+               f"WHERE k.sheet = {self._sheet} AND k.{self._col} = {self._first - 1} + {self.pos} "
+               f"AND k.{self._other}) k")
+        return f"(SELECT COALESCE({value}, {default}) {src})" if default is not None else f"(SELECT {value} {src})"
+
+    def hit(self) -> str:
+        return self._hit
+
+
+def _le_search(c, x: Expr, line: Area, fname: str, back=None):
+    """The 'largest value <= x' search (MATCH 1, VLOOKUP/HLOOKUP approximate, LOOKUP). Excel answers from its
+    binary search: on data in order that is the largest value <= x, one aggregate; out of order it is the search
+    path itself, compiled as such (Walk) when the table is plain input numbers. Text or MATCH -1 out of order
+    stays UNRESOLVED: Excel's answer is not derivable from the file."""
+    seen = _line_values(c, line, fname)
+    values = [v for _, v in seen]
+    if all(a <= b for a, b in zip(values, values[1:])):
+        return Search(x, line, "le", wild=False, back=back)
+    unsorted = (f"{fname} approximate match needs ascending sorted data: on unsorted data Excel's answer depends "
+                "on its binary search")
+    if x.type != "num" or any(kind != "n" for kind, _ in seen):
+        raise Unsupported(unsorted)
+    vertical = line.c1 == line.c2
+    numbers = []
+    for i in range(line.r2 - line.r1 + 1 if vertical else line.c2 - line.c1 + 1):
+        row = line.r1 + i if vertical else line.r1
+        col = line.c1 if vertical else line.c1 + i
+        cell = c.book.cells.get((line.sheet, row, col))
+        if cell is None or (cell.kind == "blank" and cell.formula is None):
+            raise Unsupported(f"{fname} approximate match on data out of order compiles Excel's search, which "
+                              "needs the table without empty cells")
+        if cell.formula is not None:
+            raise Unsupported(f"{fname} approximate match on data out of order compiles Excel's search, which "
+                              "needs the table's values written as inputs")
+        if cell.kind != "n" or not math.isfinite(cell.value):
+            raise Unsupported(unsorted)
+        numbers.append(cell.value)
+    states = _walk_states(numbers)
+    if len(states) > MAX_WALK_STATES:
+        raise Unsupported(f"{fname} approximate match on data out of order compiles Excel's search, and the "
+                          f"search is too large to compile ({len(states)} probes)")
+    return Walk(x, line, states, back)
 
 
 class Search:
@@ -182,11 +299,13 @@ def _table_lookup(fname: str, by_row: bool):
         if not ok:
             raise Unsupported(f"{fname} {'column' if by_row else 'row'} index outside the table")
         x = _xlookup_x(c, args, sheet)
-        if not exact:
-            _require_sorted(c, line, False, fname)
-        found = Search(x, line, "exact" if exact else "le", wild=exact, back=("k.sheet", hit))
+        if exact:
+            found = Search(x, line, "exact", wild=True, back=("k.sheet", hit))
+        else:
+            found = _le_search(c, x, line, fname, back=("k.sheet", hit))
         keys = c.ready(target)
-        return _read(found.pick, _type_of(c, target, keys), errs(x.err, _found_error(found.pick, "#N/A")))
+        return _read(found.pick, _type_of(c, target, keys),
+                     _stale(found, errs(x.err, _found_error(found.pick, "#N/A"))))
     return fn
 
 
@@ -209,12 +328,14 @@ def match(c, args, sheet):
         raise Unsupported("MATCH type must be -1, 0 or 1 written in the formula")
     line = _line(c, args[1], sheet, "MATCH")
     x = _xlookup_x(c, args, sheet)
-    if kind != 0:
-        _require_sorted(c, line, kind == -1, "MATCH")
-    found = Search(x, line, {0: "exact", 1: "le", -1: "ge"}[kind], wild=True)
+    if kind == -1:
+        _require_sorted(c, line, True, "MATCH")
+        found = Search(x, line, "ge", wild=True)
+    else:
+        found = _le_search(c, x, line, "MATCH") if kind == 1 else Search(x, line, "exact", wild=True)
     first = line.r1 if line.c1 == line.c2 else line.c1
     return Expr(found.pick(f"CAST({found.pos} - {first} + 1 AS DOUBLE)"), "num",
-                errs(x.err, f"(CASE WHEN NOT {found.hit()} THEN '#N/A' END)"))
+                _stale(found, errs(x.err, f"(CASE WHEN NOT {found.hit()} THEN '#N/A' END)")))
 
 
 @register("XLOOKUP")
@@ -275,13 +396,13 @@ def lookup(c, args, sheet):
             look = Area(area.sheet, area.r1, area.c1, area.r2, area.c1)
             back = Area(area.sheet, area.r1, area.c2, area.r2, area.c2)
     x = _xlookup_x(c, args, sheet)
-    _require_sorted(c, look, False, "LOOKUP")
     step = f"k.row_num - {look.r1}" if look.c1 == look.c2 else f"k.col_num - {look.c1}"
     hit = (f"r.col_num = {back.c1} AND r.row_num = {back.r1} + {step}" if back.c1 == back.c2
            else f"r.row_num = {back.r1} AND r.col_num = {back.c1} + {step}")
-    search = Search(x, look, "le", wild=False, back=(lit_str(back.sheet).sql, hit))
+    found = _le_search(c, x, look, "LOOKUP", back=(lit_str(back.sheet).sql, hit))
     keys = c.ready(back)
-    return _read(search.pick, _type_of(c, back, keys), errs(x.err, _found_error(search.pick, "#N/A")))
+    return _read(found.pick, _type_of(c, back, keys),
+                 _stale(found, errs(x.err, _found_error(found.pick, "#N/A"))))
 
 
 @register("INDEX")

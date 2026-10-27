@@ -28,9 +28,10 @@ def _kind(v):
 
 def _cell_xml(ref, spec):
     if isinstance(spec, tuple):
-        formula, saved = spec
+        formula, saved = spec[0], spec[1]
         if formula.startswith("{="):
-            f = f'<f t="array" ref="{ref}">{escape(formula[2:-1])}</f>'
+            spill = spec[2] if len(spec) > 2 else ref  # a CSE formula's ref: one cell, or the block it fills
+            f = f'<f t="array" ref="{spill}">{escape(formula[2:-1])}</f>'
         else:
             f = f"<f>{escape(formula[1:])}</f>"
         if saved is None:

@@ -15,7 +15,13 @@ Value = Union[float, str, bool, None]
 
 
 class Unsupported(Exception):
-    """A cell cannot be translated. The message becomes the UNRESOLVED reason shown to the user."""
+    """A cell cannot be translated. The message becomes the UNRESOLVED reason shown to the user.
+
+    dep: the unresolved cell that stopped the compile, when the reason is that the cell reads one ('depends on
+    unresolved cell'); the report attributes the cell to that cell's reason so the reasons can be ranked."""
+    def __init__(self, message: str, dep: "Key | None" = None):
+        super().__init__(message)
+        self.dep = dep
 
 
 def a1(key: Key) -> str:
@@ -32,6 +38,7 @@ class Cell:
     value: Value  # Excel-saved value; numbers as float, dates as Excel serial numbers
     kind: Kind  # kind of the saved value
     array: bool = False  # array (Ctrl+Shift+Enter) formula
+    ref: str | None = None  # the array formula's ref ("A1" one cell, "A1:A3" a block), None when not an array
 
     @property
     def key(self) -> Key:

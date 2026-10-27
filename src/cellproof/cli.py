@@ -41,7 +41,8 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     out = args.out or args.workbook.with_name(args.workbook.stem + "_dbt")
     write_project(book, compiled, out, args.workbook.stem)
-    counts = write_report(verdicts, compiled.findings, out, args.workbook.name, computed, compiled.notes)
+    counts = write_report(verdicts, compiled.findings, out, args.workbook.name, computed, compiled.notes,
+                          compiled.chains)
     if computed:
         print(f"{len(computed)} expected values computed by the formulas library (the file had none saved)")
     print(f"{counts['PASS']} pass, {counts['FAIL']} fail, {counts['UNRESOLVED']} unresolved -> {out / 'REPORT.md'}")

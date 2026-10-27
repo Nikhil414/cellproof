@@ -87,12 +87,14 @@ def test_a_typed_in_error_is_reported_before_an_error_inside_a_referenced_cell()
     assert [got[("F", i, 1)] for i in range(1, 9)] == [("e", None, "#DIV/0!")] * 2 + [("e", None, "#N/A")] +         [("e", None, "#DIV/0!")] * 5
 
 
-def test_approximate_match_on_unsorted_data_is_unresolved_not_guessed():
-    # Excel's MATCH(150, {0,100,500}, -1) is #N/A: it binary-searches and assumes descending data.
-    _, c = run([("=MATCH(150,S!D1:D3,-1)", "#N/A"), ("=MATCH(150,S!E1:E3,-1)", 1), ("=MATCH(150,S!D1:D3,1)", 2),
-                ("=MATCH(150,S!E1:E3,1)", 3)])
-    assert "sorted" in c.unresolved[("F", 1, 1)] and "sorted" in c.unresolved[("F", 4, 1)]
-    assert ("F", 2, 1) not in c.unresolved and ("F", 3, 1) not in c.unresolved
+def test_approximate_match_on_unsorted_data():
+    # Excel's MATCH(150, {0,100,500}, -1) is #N/A: type -1 on data out of order is not derivable (not guessed).
+    # Type 1 is the binary search itself: MATCH(150, {500,100,0}, 1) probes 100 (<=150, go right), then 0 (<=150)
+    # -> 3, Excel's own answer although the bracket would be position 2.
+    got, c = run([("=MATCH(150,S!D1:D3,-1)", "#N/A"), ("=MATCH(150,S!E1:E3,-1)", 1), ("=MATCH(150,S!D1:D3,1)", 2),
+                  ("=MATCH(150,S!E1:E3,1)", 3)])
+    assert "sorted" in c.unresolved[("F", 1, 1)] and list(c.unresolved) == [("F", 1, 1)]
+    assert [got[("F", i, 1)] for i in (2, 3, 4)] == [N(1), N(2), N(3)]
 
 
 def test_a_negative_number_to_the_power_of_one_over_an_odd_number_is_the_real_root():

@@ -18,7 +18,11 @@ PLATFORM = "#PLATFORM"  # not an Excel error either: Excel for Mac answers diffe
 PLATFORM_REASON = "CHAR above 127 gives a different character in Excel for Mac, which last calculated this file"
 EARLY1900 = "#1900"  # nor this: a date before 1 March 1900, where Excel counts a 29 February that never existed
 EARLY1900_REASON = "YEARFRAC of a date before 1 March 1900, around Excel's 29 February 1900 that never existed"
-SETTINGS = {LOCALE: LOCALE_REASON, PLATFORM: PLATFORM_REASON, EARLY1900: EARLY1900_REASON}  # reported as UNRESOLVED
+STALE = "#STALE"  # nor this: a compiled binary search whose table's values changed after translation
+STALE_REASON = ("the lookup table's values changed after the workbook was translated, so its compiled search is "
+                "out of date: re-run cellproof")
+SETTINGS = {LOCALE: LOCALE_REASON, PLATFORM: PLATFORM_REASON, EARLY1900: EARLY1900_REASON,
+            STALE: STALE_REASON}  # reported as UNRESOLVED
 Type = Literal["num", "txt", "bool", "blank", "err", "any"]
 
 

@@ -18,6 +18,9 @@ Everything below is on `main`, built test-first, each piece reviewed by a fresh 
 | Tokenize once | a formula pasted down a column is tokenized once; the next rows' text is predicted and only re-tokenized when it differs |
 | Implicit intersection | a one-column range where one value is expected takes the formula's row; `INDIRECT` of fixed text; MODE (found in a user's workbook) |
 | Criteria row-wise | the *IF(S) family with a criterion from the row (`=COUNTIFS($E:$E,">"&A2,...)`) compiles into the region's statement too |
+| Impact-ranked unresolveds | the report groups UNRESOLVED cells by the reason to fix first ("Where to start"): the compiler records which unresolved cell stopped a compile (`Unsupported.dep`), each chained cell is attributed to the first blocker its chain reaches, reasons are ranked by reach; report.json gains `unresolved_groups` and per-cell `blocked_by` |
+| Approximate lookups unsorted | MATCH type 1 / VLOOKUP / HLOOKUP / LOOKUP over a plain numeric input table out of order compiles Excel's binary-search path (a decision tree of probes, depths and x-intervals, one aggregate in SQL; verified differentially against the bisection and against real Excel answers). A changed table is #STALE -> UNRESOLVED, never a stale answer. Type -1 and text stay UNRESOLVED (Excel's rule there is not derivable; LibreOffice differs). examples/functions.xlsx: 4 UNRESOLVED -> 2 |
+| Arrays slice 1 | element-wise arrays in the aggregates: `SUM(A1:A10*B1:B10)`, `SUMPRODUCT((A1:A9>5)*C1:C9)`, `MAX(A1:A9-1)`. An array argument is one relation with the cells table's columns (a row per element position, blanks and all), which SUM/PRODUCT/MAX/MIN/AVERAGE/COUNT/COUNTA/SUMPRODUCT read like a range. Text element -> #VALUE!, empty -> 0, first error wins. SUM moved from functions.py onto the aggregate machinery. A single-cell CSE formula compiles (`Cell.ref` kept from the file); multi-cell stays UNRESOLVED. Next: IF over ranges (`MAX(IF(...))`), & and ^ on arrays, text comparisons |
 | Open source | MIT license, README with limits, SECURITY.md, CI on Windows/macOS/Linux x Python 3.10-3.13 |
 
 Tests: about 437 (dbt build included), plus 3 workbooks saved by real Excel that all PASS (4 cells UNRESOLVED on
@@ -80,8 +83,9 @@ What Excel taught us (each has a test in `tests/test_excel_findings.py`):
 
 ## Next
 
-1. Array formulas and array evaluation (`SUM(A1:A10*B1:B10)`, `MAX(IF(...))`, `A1*{1,2}`). LOOKUP, YEARFRAC and
-   array constants where a range is taken are done (unreleased).
+1. Array evaluation, next slices: IF over ranges (`MAX(IF(...))`, the classic conditional aggregate), & and ^ on
+   arrays, text comparisons per Excel's collation, then legacy multi-cell array formulas and dynamic arrays.
+   (Done: element-wise arithmetic and comparisons inside the aggregates - see Arrays slice 1 above.)
 2. Test on more real analyst workbooks (one user workbook found 4 gaps the 85 public files did not).
 3. Read time (openpyxl loads the workbook twice) and the per-cell dependency loop.
 4. Plan 3: AI retry loop for failed cells (it sees formula structure only, never values).

@@ -52,23 +52,12 @@ def first_error(c, area: Area, keys) -> str:
 
 
 def range_sum(c, area: Area) -> Expr:
-    """SUM over a range: text, TRUE/FALSE and blanks are skipped; the first error wins."""
+    """SUM over a range: text, TRUE/FALSE and blanks are skipped; the first error wins (the region compiler
+    reads running totals with this; the SUM function itself is the aggregate in fn/aggregate.py)."""
     keys = c.ready(area)
     note_text_numbers(c, keys)
     return Expr(f"(SELECT COALESCE(SUM(num), CAST(0 AS DOUBLE)) FROM {CELLS} WHERE {where_area(area)} AND kind = 'n')",
                 "num", first_error(c, area, keys))
-
-
-@register("SUM")
-def sum_(c, args, sheet):
-    parts = [range_sum(c, resolve(arg.text, sheet, c.book)) if isinstance(arg, RefNode) else num(c.expr(arg, sheet))
-             for arg in args]
-    if not parts:
-        return ZERO
-    # Real Excel: SUM(H3,1/0) with H3 = #N/A is #DIV/0!. Typed-in expressions are evaluated first.
-    typed = [p for a, p in zip(args, parts) if not isinstance(a, RefNode)]
-    cells = [p for a, p in zip(args, parts) if isinstance(a, RefNode)]
-    return Expr("(" + " + ".join(p.sql for p in parts) + ")", "num", errs(*(p.err for p in typed + cells)))
 
 
 @register("IF")
