@@ -101,7 +101,9 @@ def _shift(name: str, last: bool):
         # real Excel: TRUE/FALSE in either argument is #VALUE!
         s, m = _serial(c, args[0], sheet, strict=True), num_strict(c.expr(args[1], sheet))
         start = f"greatest({s.sql}, 1)" if last else s.sql  # serial 0 is "1900-01-00": EOMONTH(0,0) is 31
-        d = f"CAST({to_date(start)} + to_months(CAST(trunc({m.sql}) AS INTEGER)) AS DATE)"
+        # clamp before the cast: DuckDB 2.0 folds the cast of a huge literal and fails even where the guard below
+        # would have returned #NUM!
+        d = f"CAST({to_date(start)} + to_months(CAST(greatest(least(trunc({m.sql}), 120001), -120001) AS INTEGER)) AS DATE)"
         if last:
             d = f"last_day({d})"
         ok = f"({_ok(s)} AND ({m.err}) IS NULL AND trunc({m.sql}) BETWEEN -120000 AND 120000)"

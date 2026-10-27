@@ -84,7 +84,7 @@ def textjoin(c, args, sheet):
     lists, err = _pieces(c, args[2:], sheet, keep_blanks=not args[1].value)
     items = f"list_concat({', '.join(lists)})" if len(lists) > 1 else lists[0]
     if args[1].value:
-        items = f"list_filter({items}, x -> x <> '')"
+        items = f"list_filter({items}, lambda x: x <> '')"
     return Expr(f"array_to_string({items}, {delim.sql})", "txt", errs(delim.err, *err))
 
 
@@ -131,7 +131,7 @@ _text1("LOWER", lambda t: f"lower({t})")
 # each character paired with the one before it; t stays outside the lambda (it can be a subquery, which DuckDB does
 # not allow inside one). \p{L}: any letter, accented ones too (RE2's [[:alpha:]] is ASCII only)
 _text1("PROPER", lambda t: (f"array_to_string(list_transform(list_zip(string_split({t}, ''), "
-                            f"list_concat([' '], string_split({t}, ''))), x -> CASE WHEN "
+                            f"list_concat([' '], string_split({t}, ''))), lambda x: CASE WHEN "
                             f"regexp_matches(x[2], '\\p{{L}}') THEN lower(x[1]) ELSE upper(x[1]) END), '')"))
 _text1("CLEAN", lambda t: f"regexp_replace({t}, '[\\x00-\\x1f]', '', 'g')")
 
