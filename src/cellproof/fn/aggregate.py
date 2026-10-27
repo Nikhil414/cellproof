@@ -11,10 +11,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from cellproof.expr import BLANK, CELLS, NO_ERR, Expr, errs, lit_str, num, where_area
+from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, errs, lit_str, num, num_text, parse_num, where_area,
+                            _text_bool)
 from cellproof.functions import arity, note_text_numbers, register
 from cellproof.model import Unsupported
-from cellproof.parser import Binary, Num, RefNode, Unary
+from cellproof.parser import Binary, Call, Num, RefNode, Unary
 from cellproof.refs import Area, resolve
 
 
@@ -48,10 +49,6 @@ class Src:
     area: Area
     keys: object  # compiler.Keys
     alias: str
-
-    def numeric(self) -> bool:
-        """Errors ride in the element error; text and TRUE/FALSE need Excel's collation per element, not built yet."""
-        return self.keys.kinds <= {"n", "blank", "e"}
 
 
 @dataclass
@@ -120,52 +117,160 @@ def _propagated(l: Arr, r: Arr) -> str:
     return (f"CASE WHEN {l.err} IS NOT NULL THEN {l.err} WHEN {r.err} IS NOT NULL THEN {r.err} END")
 
 
+def _element_number(a: Arr) -> str:
+    """One element as Excel's arithmetic reads it: numeric text converts ("3" -> 3), other text and errors are
+    NULL (the #VALUE! then comes from the error CASE), empty is 0."""
+    return (f"CASE WHEN {a.kind} = 's' THEN {parse_num(f'COALESCE({a.txt}, ' + chr(39) * 2 + ')')} "
+            f"WHEN {a.kind} = 'e' THEN NULL ELSE COALESCE({a.num}, 0) END")
+
+
 def _arith(l: Arr, r: Arr, op: str) -> Arr:
+    lnum, rnum = _element_number(l), _element_number(r)
     err = (f"CASE WHEN {l.err} IS NOT NULL THEN {l.err} WHEN {r.err} IS NOT NULL THEN {r.err} "
-           f"WHEN {l.kind} = 's' OR {r.kind} = 's' THEN '#VALUE!'"
-           + (f" WHEN COALESCE({r.num}, 0) = 0 THEN '#DIV/0!'" if op == "/" else "") + " END")
-    lnum, rnum = f"COALESCE({l.num}, 0)", f"COALESCE({r.num}, 0)"
+           f"WHEN {lnum} IS NULL THEN '#VALUE!' WHEN {rnum} IS NULL THEN '#VALUE!'"
+           + (f" WHEN COALESCE({rnum}, 0) = 0 THEN '#DIV/0!'" if op == "/" else "") + " END")
     val = f"({lnum} / NULLIF({rnum}, 0))" if op == "/" else f"({lnum} {op} {rnum})"
     num = f"CASE WHEN {err} IS NOT NULL THEN NULL ELSE {val} END"
     return _merged(l, r, "'n'", num, "CAST(NULL AS VARCHAR)", err)
 
 
-def _compare(l: Arr, r: Arr, op: str, fname: str) -> Arr:
-    if not all(s.numeric() for s in l.srcs + r.srcs):
-        raise Unsupported(f"{fname} array comparisons of text or TRUE/FALSE not supported yet")
+def _compare(l: Arr, r: Arr, op: str) -> Arr:
+    """Excel's comparison per element: text case-insensitively, and across types numbers < text < TRUE/FALSE."""
     err = _propagated(l, r)
-    num = (f"CASE WHEN {err} IS NOT NULL THEN NULL "
-           f"WHEN COALESCE({l.num}, 0) {op} COALESCE({r.num}, 0) THEN 1 ELSE 0 END")
+    cmp = (f"CASE WHEN {l.kind} = 's' AND {r.kind} = 's' "
+           f"THEN (LOWER(COALESCE({l.txt}, '')) {op} LOWER(COALESCE({r.txt}, ''))) "
+           f"WHEN {l.kind} = 's' AND {r.kind} = 'b' THEN (1 {op} 2) "
+           f"WHEN {l.kind} = 'b' AND {r.kind} = 's' THEN (2 {op} 1) "
+           f"WHEN {l.kind} = 's' OR {r.kind} = 's' THEN (1 {op} 0) "  # text against a number or an empty cell
+           f"ELSE (COALESCE({l.num}, 0) {op} COALESCE({r.num}, 0)) END")
+    num = f"CASE WHEN {err} IS NOT NULL THEN NULL WHEN {cmp} THEN 1 ELSE 0 END"
     return _merged(l, r, "'b'", num, "CAST(NULL AS VARCHAR)", err)
+
+
+def _power_array(l: Arr, r: Arr) -> Arr:
+    """Excel's ^ per element, with its guards: the real cube root of a negative base, #NUM! for the rest of the
+    fractional powers of one, #DIV/0! for 0 to a negative, #NUM! for 0^0 (compiler.binary ports the same rules)."""
+    lnum, rnum = _element_number(l), _element_number(r)
+    root = f"(1 / NULLIF({rnum}, 0))"
+    odd_root = (f"({lnum} < 0 AND {rnum} <> FLOOR({rnum}) AND abs({root} - round({root})) < 1e-9 "
+                f"AND abs(round({root})) % 2 = 1)")
+    err = (f"CASE WHEN {l.err} IS NOT NULL THEN {l.err} WHEN {r.err} IS NOT NULL THEN {r.err} "
+           f"WHEN {lnum} IS NULL THEN '#VALUE!' WHEN {rnum} IS NULL THEN '#VALUE!' "
+           f"WHEN {lnum} = 0 AND {rnum} < 0 THEN '#DIV/0!' "
+           f"WHEN {lnum} = 0 AND {rnum} = 0 THEN '#NUM!' "
+           f"WHEN {lnum} < 0 AND {rnum} <> FLOOR({rnum}) AND NOT {odd_root} THEN '#NUM!' END")
+    val = f"(CASE WHEN {odd_root} THEN -POWER(-{lnum}, {rnum}) ELSE POWER({lnum}, {rnum}) END)"
+    return _merged(l, r, "'n'", f"CASE WHEN {err} IS NOT NULL THEN NULL ELSE {val} END",
+                   "CAST(NULL AS VARCHAR)", err)
+
+
+def _element_text(a: Arr) -> str:
+    """One element as Excel writes it in a concatenation: TRUE/FALSE, numbers by the 15-digit rule, empty ''."""
+    return (f"CASE WHEN {a.kind} = 's' THEN COALESCE({a.txt}, '') "
+            f"WHEN {a.kind} = 'b' THEN (CASE WHEN COALESCE({a.num}, 0) <> 0 THEN 'TRUE' ELSE 'FALSE' END) "
+            f"WHEN {a.kind} IS NULL THEN '' ELSE {num_text(f'COALESCE({a.num}, 0)')} END")
+
+
+def _concat_array(l: Arr, r: Arr) -> Arr:
+    return _merged(l, r, "'s'", "CAST(NULL AS DOUBLE)",
+                   f"({_element_text(l)} || {_element_text(r)})", _propagated(l, r))
+
+
+def _iferror_array(c, args, sheet: str, fname: str, na_only: bool) -> Arr:
+    """IFERROR/IFNA over arrays: the fallback element replaces every erroring element (IFNA: only #N/A)."""
+    if len(args) != 2 or args[1] is None:
+        raise Unsupported(f"{fname} needs two arguments")
+    value = _array(c, args[0], sheet, fname, "raw")
+    fallback = _array(c, args[1], sheet, fname, "raw")
+    shapes = {a.shape for a in (value, fallback) if a.shape is not None}
+    if len(shapes) > 1:
+        raise Unsupported(f"{fname} arrays of different sizes not supported yet")
+    swap = f"{value.err} = '#N/A'" if na_only else f"{value.err} IS NOT NULL"
+    kind = f"CASE WHEN {swap} THEN {fallback.kind} ELSE {value.kind} END"
+    num = f"CASE WHEN {swap} THEN {fallback.num} ELSE {value.num} END"
+    txt = f"CASE WHEN {swap} THEN {fallback.txt} ELSE {value.txt} END"
+    return _merged(value, fallback, kind, num, txt, f"CASE WHEN {swap} THEN {fallback.err} ELSE NULL END")
 
 
 ARRAY_OPS = {"+", "-", "*", "/", "=", "<>", "<", ">", "<=", ">="}
 
 
-def _array(c, node, sheet: str, fname: str, compare: bool = False) -> Arr:
-    """An AST node as an element-wise array: *, +, -, /, comparisons and unary minus over aligned ranges, array
-    constants and scalars. Anything else is Unsupported - the cell is UNRESOLVED, never silently intersected."""
+def _scalar_element(e: Expr) -> Arr:
+    """One element from a plain value, keeping its kind (comparisons rank by type; arithmetic converts below)."""
+    if e.type == "blank":
+        return Arr([], "CAST(NULL AS VARCHAR)", "CAST(NULL AS DOUBLE)", "CAST(NULL AS VARCHAR)", e.err, None)
+    if e.type == "txt":
+        return Arr([], "'s'", "CAST(NULL AS DOUBLE)", e.sql, e.err, None)
+    if e.type == "bool":
+        return Arr([], "'b'", f"CAST({e.sql} AS DOUBLE)", "CAST(NULL AS VARCHAR)", e.err, None)
+    if e.type == "err":
+        return Arr([], "'e'", "CAST(NULL AS DOUBLE)", "CAST(NULL AS VARCHAR)", e.err, None)
+    if e.type == "any":
+        return Arr([], e.kind, e.sql, e.txt, e.err, None)
+    return Arr([], "'n'", e.sql, "CAST(NULL AS VARCHAR)", e.err, None)
+
+
+def _array(c, node, sheet: str, fname: str, leaf: str = "num") -> Arr:
+    """An AST node as an element-wise array: *, +, -, /, comparisons, unary minus and IF over aligned ranges,
+    array constants and scalars. Anything else is Unsupported - the cell is UNRESOLVED, never intersected.
+    A scalar leaf keeps its kind where the value passes through (comparisons rank by type, IF returns it) and
+    is converted where arithmetic reads it ("3" -> 3)."""
     if isinstance(node, Binary):
         if node.op == "&":
-            raise Unsupported(f"{fname} cannot concatenate arrays yet")
+            return _concat_array(_array(c, node.left, sheet, fname, "raw"),
+                                 _array(c, node.right, sheet, fname, "raw"))
+        if node.op == "^":
+            return _power_array(_array(c, node.left, sheet, fname, "num"),
+                                _array(c, node.right, sheet, fname, "num"))
         if node.op not in ARRAY_OPS:
             raise Unsupported(f"{fname} cannot apply '{node.op}' to arrays yet")
         if node.op in ("=", "<>", "<", ">", "<=", ">="):
-            return _compare(_array(c, node.left, sheet, fname, True),
-                            _array(c, node.right, sheet, fname, True), node.op, fname)
-        return _arith(_array(c, node.left, sheet, fname), _array(c, node.right, sheet, fname), node.op)
+            return _compare(_array(c, node.left, sheet, fname, "raw"),
+                            _array(c, node.right, sheet, fname, "raw"), node.op)
+        return _arith(_array(c, node.left, sheet, fname, "num"),
+                      _array(c, node.right, sheet, fname, "num"), node.op)
+    if isinstance(node, Call):
+        if node.name == "IF":
+            return _if_array(c, node.args, sheet, fname)
+        if node.name in ("IFERROR", "IFNA"):
+            return _iferror_array(c, node.args, sheet, fname, node.name == "IFNA")
+        raise Unsupported(f"{fname} cannot apply {node.name} to arrays yet")
     if isinstance(node, Unary) and node.op == "-":
         zero = Arr([], "'n'", "CAST(0 AS DOUBLE)", "CAST(NULL AS VARCHAR)", "NULL", None)
-        return _arith(zero, _array(c, node.operand, sheet, fname, compare), "-")
+        return _arith(zero, _array(c, node.operand, sheet, fname, "num"), "-")
     if isinstance(node, RefNode) and not resolve(node.text, sheet, c.book).is_single:
         return _base(c, node, sheet, fname)
     e = c.expr(node, sheet)  # a scalar: a number, one cell or an expression of them, one element for every position
-    if compare and e.type not in ("num", "blank"):
-        raise Unsupported(f"{fname} array comparisons of text or TRUE/FALSE not supported yet")
-    if e.type == "blank":
-        return Arr([], "'n'", "CAST(NULL AS DOUBLE)", "CAST(NULL AS VARCHAR)", e.err, None)
-    n = num(e)
-    return Arr([], "'n'", n.sql, "CAST(NULL AS VARCHAR)", n.err, None)
+    return _scalar_element(e) if leaf == "raw" else _scalar_element(num(e))
+
+
+def _truth(kind: str, num: str, txt: str, err: str) -> tuple[str, str]:
+    """(condition, error) of one element as Excel's IF reads it: TRUE/FALSE text, numbers <> 0, empty FALSE."""
+    b = _text_bool(f"COALESCE({txt}, '')")
+    cond = (f"CASE WHEN {err} IS NOT NULL THEN NULL WHEN {kind} = 's' THEN {b} "
+            f"WHEN {kind} IS NULL THEN FALSE ELSE ({num} <> 0) END")
+    cerr = f"CASE WHEN {err} IS NOT NULL THEN {err} WHEN {kind} = 's' AND {b} IS NULL THEN '#VALUE!' END"
+    return cond, cerr
+
+
+def _if_array(c, args, sheet: str, fname: str) -> Arr:
+    """IF over arrays: the condition picks one element per position. The untaken branch's error never shows
+    (only computed away); a missing third argument gives FALSE elements, which MAX and friends skip."""
+    if not 2 <= len(args) <= 3:
+        raise Unsupported(f"{fname} needs two or three arguments")
+    cond = _array(c, args[0], sheet, fname, "raw")
+    yes = _array(c, args[1], sheet, fname, "raw")
+    no = (_array(c, args[2], sheet, fname, "raw") if len(args) == 3
+          else Arr([], "'b'", "CAST(0 AS DOUBLE)", "CAST(NULL AS VARCHAR)", "NULL", None))
+    shapes = {a.shape for a in (cond, yes, no) if a.shape is not None}
+    if len(shapes) > 1:
+        raise Unsupported(f"{fname} arrays of different sizes not supported yet")
+    taken, cerr = _truth(cond.kind, cond.num, cond.txt, cond.err)
+    kind = f"CASE WHEN {cerr} IS NOT NULL THEN 'e' WHEN {taken} THEN {yes.kind} ELSE {no.kind} END"
+    num = f"CASE WHEN {cerr} IS NOT NULL THEN NULL WHEN {taken} THEN {yes.num} ELSE {no.num} END"
+    txt = f"CASE WHEN {cerr} IS NOT NULL THEN NULL WHEN {taken} THEN {yes.txt} ELSE {no.txt} END"
+    err = f"CASE WHEN {cerr} IS NOT NULL THEN {cerr} WHEN {taken} THEN {yes.err} ELSE {no.err} END"
+    return _merged(_merged(cond, yes, kind, num, txt, err), no, kind, num, txt, err)
 
 
 def _rng(c, node, sheet: str, skip_subtotals: bool = False) -> Rng:
@@ -179,18 +284,19 @@ def _rng(c, node, sheet: str, skip_subtotals: bool = False) -> Rng:
 
 
 def _split(c, args, sheet: str, fname: str, skip_subtotals: bool = False) -> tuple[list, list, list]:
-    """The arguments as (ranges, arrays, values). A range arithmetic is an array; a calculation over plain
-    values stays a value, evaluated before the cells are read (MAX(H3, 1/0) is #DIV/0!)."""
+    """The arguments as (ranges, arrays, values). A range arithmetic or an IF over ranges is an array; a
+    calculation over plain values stays a value, evaluated before the cells are read (MAX(H3, 1/0) is #DIV/0!)."""
     ranges, arrays, values = [], [], []
     for a in args:
         if isinstance(a, RefNode):
             ranges.append(_rng(c, a, sheet, skip_subtotals))
-        elif isinstance(a, Binary) or (isinstance(a, Unary) and a.op == "-"):
+        elif isinstance(a, Binary) or (isinstance(a, Unary) and a.op == "-") or (
+                isinstance(a, Call) and a.name in ("IF", "IFERROR", "IFNA")):
             arr = _array(c, a, sheet, fname)
             if arr.srcs:
                 arrays.append(arr)
             else:
-                values.append(Expr(arr.num, "num", arr.err))
+                values.append(num(c.expr(a, sheet)))
         else:
             values.append(num(c.expr(a, sheet) if a is not None else BLANK))
     return ranges, arrays, values

@@ -2,12 +2,15 @@
 
 ## Unreleased
 
-- **Array arithmetic in aggregates**, the first slice of array evaluation: `SUM(A1:A10*B1:B10)`,
-  `SUMPRODUCT((A1:A9>5)*C1:C9)`, `MAX(A1:A9-1)` and friends evaluate element by element like modern Excel - an
-  empty element is 0, a text one #VALUE!, the first error wins. SUM, SUMPRODUCT, MAX, MIN, AVERAGE, COUNT, COUNTA
-  and PRODUCT take arrays; comparisons inside arrays need numeric columns so far. A single-cell array formula
-  (Ctrl+Shift+Enter) now compiles; one over several cells is UNRESOLVED. Plain-entered range arithmetic as an
-  aggregate argument now follows modern Excel (the element-wise answer), not the legacy first-row intersection.
+- **Array arithmetic in aggregates**, the first slices of array evaluation: `SUM(A1:A10*B1:B10)`,
+  `SUMPRODUCT((A1:A9>5)*C1:C9)`, `MAX(IF(A1:A9="x",B1:B9))`, `SUM(IFERROR(A1:A9/B1:B9,0))`, `COUNTA(A1:A9&B1:B9)`,
+  `SUM(A1:A9^2)` and friends evaluate element by element like modern Excel - an empty element is 0, text converts
+  when it is a number and is #VALUE! otherwise, comparisons rank numbers < text < TRUE/FALSE case-insensitively,
+  concatenation writes numbers the Excel way, and the first error wins. SUM, SUMPRODUCT, MAX, MIN, AVERAGE, COUNT,
+  COUNTA and PRODUCT take arrays; IF, IFERROR and IFNA take them as their arguments. A single-cell array formula
+  (Ctrl+Shift+Enter) now compiles; one over several cells is UNRESOLVED. Plain-entered range arithmetic or IF as an
+  aggregate argument follows modern Excel (the element-wise answer), not the legacy first-row intersection - a
+  workbook an old Excel last saved can show FAILs there, with both values shown.
 - **Approximate lookups on unsorted data** (MATCH type 1, VLOOKUP/HLOOKUP approximate, LOOKUP) over a plain numeric
   input table: cellproof now compiles Excel's binary-search path itself - the answer is the last probe the search
   moves right from, not the sorted bracket, and it matches Excel's own answers on files we checked (the 9.99E+307

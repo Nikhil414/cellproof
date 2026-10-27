@@ -83,12 +83,6 @@ def test_array_elements_carry_excel_s_errors():
         ("e", None, "#VALUE!"), ("e", None, "#N/A"), ("e", None, "#VALUE!"), ("e", None, "#DIV/0!")]
 
 
-def test_array_comparisons_of_text_stay_unresolved():
-    # Excel compares text by its collation per element; until that is compiled, refuse rather than guess.
-    _, c = run({"E1": ('=SUMPRODUCT((D!A1:A2="a")*1)', 0)}, {"A1": "a", "A2": "b"})
-    assert "not supported yet" in c.unresolved[("S", 1, 5)]
-
-
 def test_single_cell_array_formulas_compile_and_multi_cell_ones_do_not():
     from cellproof.reader import load
     from xlsxkit import write_xlsx
@@ -104,3 +98,69 @@ def test_single_cell_array_formulas_compile_and_multi_cell_ones_do_not():
         assert compiled.unresolved[("S", 1, 7)] == "array formula over several cells"
         got = execute(book, compiled)
         assert got[("S", 1, 6)] == N(140)
+
+
+def test_if_over_ranges_in_aggregates():
+    # The classic conditional aggregate: MAX(IF(A="x", B)) entered as an array formula.
+    data = {"A1": "x", "B1": 10, "A2": "y", "B2": 20, "A3": "x", "B3": 30, "A4": "y", "B4": 40, "A5": "x", "B5": 50,
+            "C1": 6, "C2": 1, "C3": 8, "C4": 2, "C5": 1, "H1": "#N/A", "H2": 9}
+    got, c = run({
+        "E1": ('=MAX(IF(D!A1:A5="x", D!B1:B5))', 50),
+        "E2": ('=SUM(IF(D!C1:C5>2, D!B1:B5, 0))', 40),      # 10 + 0 + 30 + 0 + 0
+        "E3": ('=COUNT(IF(D!A1:A5="x", D!B1:B5))', 3),      # FALSE elements are not numbers
+        "E4": ('=MAX(IF(D!A1:A5="y", D!B1:B5))', 40),
+        "E5": ('=MAX(IF(D!A1:A5="x", "a", "b"))', 0),       # MAX skips text, like a range of text
+        "E6": ('=SUM(IF(D!B1:B5, 1, 0))', 5),               # numbers as conditions: every one is TRUE
+        "E7": ('=MAX(IF(D!A1:A5="X", D!B1:B5))', 50),       # text compares case-insensitively
+        "E8": ('=SUM(IF(D!A1:A3="x", D!H1:H3, D!C1:C3))', "#N/A"),  # taken branch's error wins: #N/A, 1, blank
+    }, data)
+    assert c.unresolved == {}
+    assert [got[("S", r, 5)] for r in range(1, 9)] == [
+        N(50), N(40), N(3), N(40), N(0), N(5), N(50), ("e", None, "#N/A")]
+
+
+def test_if_arrays_refuse_what_excel_answers_differently():
+    _, c = run({"E1": ('=MAX(IF(D!A1:A5="x", D!B1:B4))', 0)},
+               {"A1": "x", "A2": "y", "B1": 1, "B2": 2, "B3": 3, "B4": 4})
+    assert "different sizes" in c.unresolved[("S", 1, 5)]
+
+
+def test_text_comparisons_work_element_wise():
+    data = {"A1": "a", "A2": "b", "A3": 3}
+    got, c = run({
+        "E1": ('=SUMPRODUCT((D!A1:A3="a")*1)', 1),
+        "E2": ('=SUMPRODUCT((D!A1:A3="A")*1)', 1),          # case-insensitive
+        "E3": ('=SUMPRODUCT((D!A1:A3>1)*1)', 3),            # text outranks every number: all three are TRUE
+        "E4": ('=SUM(D!A1:A3*2)', "#VALUE!"),               # text that is not a number, in arithmetic
+        "E5": ('=SUM(IF(D!A1:A3="b", 1, 0))', 1),
+    }, data)
+    assert c.unresolved == {}
+    assert [got[("S", r, 5)] for r in range(1, 6)] == [N(1), N(1), N(3), ("e", None, "#VALUE!"), N(1)]
+
+
+def test_iferror_and_ifna_over_arrays():
+    data = {"A1": 10, "B1": 2, "A2": 20, "B2": 0, "A3": 30, "B3": 5, "H1": "#N/A", "H2": 2, "H3": 3}
+    got, c = run({
+        "E1": ("=SUM(IFERROR(D!A1:A3/D!B1:B3, 0))", 11),    # 5 + (guarded) + 6
+        "E2": ('=COUNTA(IFERROR(D!A1:A3/D!B1:B3, "none"))', 3),
+        "E3": ("=SUM(IFNA(D!H1:H3, 0))", 5),                # only #N/A is replaced: 0 + 2 + 3
+        "E4": ("=SUM(IFERROR(D!H1:H3, 0))", 5),
+        "E5": ("=SUM(IFERROR(D!H1:H3/0, -1))", -3),         # every element errors, every one replaced
+    }, data)
+    assert c.unresolved == {}
+    assert [got[("S", r, 5)] for r in range(1, 6)] == [N(11), N(3), N(5), N(5), N(-3)]
+
+
+def test_concat_and_power_over_arrays():
+    data = {"A1": "a", "B1": 10, "A2": "b", "B2": 20, "A3": "c", "B3": 30, "C1": 8, "C2": 27, "C3": 64,
+            "D1": -4}
+    got, c = run({
+        "E1": ('=SUMPRODUCT((D!A1:A3&D!B1:B3="a10")*1)', 1),     # numbers become text the Excel way
+        "E2": ("=COUNTA(D!A1:A3&D!B1:B3)", 3),
+        "E3": ("=SUM(D!C1:C3^2)", 4889),                          # 64 + 729 + 4096
+        "E4": ("=SUM((-D!C1:C3)^(1/3))", -9),                     # Excel's real cube roots: -2 - 3 - 4
+        "E5": ("=SUM(D!D1:D1^0.5)", "#NUM!"),                     # a negative base to a fractional power
+    }, data)
+    assert c.unresolved == {}
+    assert [got[("S", r, 5)] for r in range(1, 6)] == [
+        N(1), N(3), N(4889), N(-9), ("e", None, "#NUM!")]

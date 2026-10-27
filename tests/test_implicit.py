@@ -60,15 +60,16 @@ def test_mode_is_the_most_frequent_number_first_seen_on_ties():
     assert [got[("S", r, 3)] for r in (1, 2, 3)] == [N(2), N(3), ("e", None, "#N/A")]
 
 
-def test_a_range_that_if_passes_into_another_function_is_not_intersected():
-    # real Excel (a user's workbook): MAX(IF(E3:E41="F",math,0)) intersects the condition (this row is "F") and then
-    # gives MAX the whole math range; cellproof cannot pass ranges through IF yet, so it must not answer
+def test_a_range_that_if_passes_into_another_function():
+    # A user's workbook saved 99 for this cell: legacy Excel intersects the condition (this row is "F") and hands
+    # MAX the whole range. Modern Excel, which cellproof follows (as for SUM(A:A*B:B)), picks element by element:
+    # max(10, 0, 5) = 10 - the report shows the saved 99 as a FAIL, the legacy artifact cellproof exists to surface.
     s = {"A2": 10.0, "A3": 99.0, "A4": 5.0, "B2": "F", "B3": "M", "B4": "F",
          "C2": ('=MAX(IF(B2:B4="F",A2:A4,0))', 99.0), "D2": ('=IF(B2:B4="F",A2:A4)+1', 11.0),
          "E2": ('=ABS(A2:A4)', 10.0)}
     got, c = run({"S": s})
-    assert ("S", 2, 3) in c.unresolved
-    assert got[("S", 2, 4)] == N(11) and got[("S", 2, 5)] == N(10)
+    assert got[("S", 2, 3)] == N(10)
+    assert got[("S", 2, 4)] == N(11) and got[("S", 2, 5)] == N(10)  # IF outside an aggregate still intersects
 
 
 def test_a_bare_word_is_a_name_never_a_whole_column():

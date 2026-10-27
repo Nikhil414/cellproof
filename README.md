@@ -95,17 +95,21 @@ cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each re
 - **File formats:** `.xlsx` and `.xlsm` only (no `.xls`, `.xlsb`, `.ods`). Macros (VBA) are ignored.
 - **Array constants** (`{0,50,100}`) work wherever a range is taken (`SUM`, `MATCH`, `LOOKUP`, `VLOOKUP`, `INDEX`...)
   and inside array arithmetic; where one value is expected (`A1*{1,2}`) they need array evaluation and are UNRESOLVED.
-- **Array arithmetic in aggregates** (`SUM(A1:A10*B1:B10)`, `SUMPRODUCT((A1:A9>5)*C1:C9)`, `MAX(A1:A9-1)`) follows
-  modern Excel: element by element, an empty element is 0, a text one #VALUE!, the first error wins. Comparisons
-  inside arrays need numeric columns so far. A single-cell array formula (Ctrl+Shift+Enter) compiles; an array
-  formula over several cells is UNRESOLVED (spilling is not read yet).
+- **Array arithmetic in aggregates** (`SUM(A1:A10*B1:B10)`, `SUMPRODUCT((A1:A9>5)*C1:C9)`, `MAX(IF(A1:A9="x",B1:B9))`,
+  `SUM(IFERROR(A1:A9/B1:B9,0))`, `COUNTA(A1:A9&B1:B9)`, `SUM(A1:A9^2)`) follows modern Excel: element by element, an
+  empty element is 0, text converts when it is a number ("3" -> 3) and is #VALUE! otherwise, comparisons rank
+  numbers < text < TRUE/FALSE case-insensitively, concatenation writes numbers the Excel way, and the first error
+  wins. A single-cell array formula (Ctrl+Shift+Enter) compiles; an array formula over several cells is UNRESOLVED
+  (spilling is not read yet). A plain-entered range arithmetic or IF as an aggregate argument follows modern Excel,
+  not the legacy first-row intersection - a workbook an old Excel last saved can show FAILs there, with both values
+  shown.
 - **Not supported:** multi-cell array formulas and dynamic arrays, volatile functions (`NOW`, `TODAY`, `RAND`, `OFFSET`, and
   `INDIRECT` of text built while the sheet runs; `INDIRECT("Sales")` is fine), functions outside the list above,
   external workbooks, structured table references (`Table1[@Col]`), INDEX used as a reference, the 1904 date system in
   TEXT date formats.
 - **Ranges where one value is expected** (`=IF(E$3:E$41="F",B$3:B$41)`) take the formula's own row or column, as
-  Excel does (implicit intersection). A range that IF/IFERROR/CHOOSE hands to another function
-  (`MAX(IF(c,A1:A9,0))`, where Excel uses the whole range) is UNRESOLVED.
+  Excel does (implicit intersection). As an aggregate's argument the element-wise answer is compiled instead (see
+  array arithmetic above). IFERROR, IFS and CHOOSE over arrays are still UNRESOLVED.
 - **Approximate lookups on unsorted data** (LOOKUP, MATCH/VLOOKUP/HLOOKUP with match type 1): compiled for plain
   numeric tables written as inputs (up to about 1,000 values): the SQL carries Excel's binary-search path itself, and
   refuses changed table values instead of answering from a stale search. MATCH with type -1, text tables, tables with
