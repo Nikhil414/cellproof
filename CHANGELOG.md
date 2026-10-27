@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.2 (2026-10-27)
 
 - **LOOKUP** (vector and array form). Like the other approximate lookups, UNRESOLVED on data out of order.
 - **YEARFRAC**, all five bases, the basis written in the formula or computed. The 1,992 YEARFRAC cells of pycel's
