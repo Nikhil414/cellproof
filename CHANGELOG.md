@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-10-31)
 
 - **Finance:** PMT, PV, FV, NPER, NPV. Microsoft's closed forms; NPV skips text, TRUE/FALSE and empty cells in a
   reference without spending a period on them (checked against pycel's Excel-saved npv.xlsx).

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cellproof"
-version = "0.2.2"
+version = "0.3.0"
 description = "Turn an Excel workbook into SQL (a dbt project on DuckDB) and prove every number matches."
 readme = "README.md"
 license = "MIT"
