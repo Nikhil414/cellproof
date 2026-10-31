@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+from bisect import bisect_left, bisect_right
 import datetime
 import re
 import zipfile
@@ -13,7 +14,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.utils.datetime import CALENDAR_MAC_1904, to_excel
 from openpyxl.worksheet.formula import ArrayFormula
 
-from cellproof.model import Book, Cell, Kind, Unsupported, Value
+from cellproof.model import Book, Cell, Kind, Unsupported, Value, a1
 from cellproof.tables import Table, expand
 
 ERRORS = {"#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A"}
@@ -160,21 +161,33 @@ def load(path: str | Path) -> Book:
 def spread_blocks(book: Book) -> None:
     """An array formula over a block (A1:C3) is written once, on its top-left cell; the other cells of the block hold
     only Excel's values. Each becomes a formula cell of its own (same text, same block), which the compiler computes
-    as this cell's element of the array."""
+    as this cell's element of the array.
+    Only cells the file holds are spread (Excel saves a value in each; a crafted ref as big as the sheet costs
+    nothing), and a block over another cell's own formula, or not starting at its anchor, is not read at all."""
+    cols: dict[str, list[int]] = {}
+    for sheet, col in book._rows_by_col:
+        cols.setdefault(sheet, []).append(col)
+    for v in cols.values():
+        v.sort()
     for key, cell in list(book.cells.items()):
         if not (cell.array and cell.ref and ":" in cell.ref):
             continue
         c1, r1, c2, r2 = openpyxl.utils.range_boundaries(cell.ref)
-        for r in range(r1, r2 + 1):
-            for c in range(c1, c2 + 1):
-                k = (cell.sheet, r, c)
-                if k == key:
-                    continue
-                old = book.cells.get(k)
-                value, kind = (old.value, old.kind) if old is not None else (None, "blank")
-                book.cells[k] = Cell(cell.sheet, r, c, cell.formula, value, kind, True, cell.ref)
-        book.max_row[cell.sheet] = max(book.max_row.get(cell.sheet, 0), r2)
-    book.__dict__.pop("_rows_by_col", None)
+        have = cols.get(cell.sheet, [])
+        inside = []
+        for c in have[bisect_left(have, c1):bisect_right(have, c2)]:
+            rows = book._rows_by_col[(cell.sheet, c)]
+            inside += [(cell.sheet, r, c) for r in rows[bisect_left(rows, r1):bisect_right(rows, r2)]
+                       if (r, c) != (cell.row, cell.col)]
+        clash = [k for k in inside if book.cells[k].formula is not None]
+        if (cell.row, cell.col) != (r1, c1) or clash:
+            why = (f"array formula block {cell.ref} overlaps the formula in {a1(clash[0])}" if clash
+                   else f"array formula block {cell.ref} does not start at its own cell")
+            book.unread[key] = why
+            continue
+        for k in inside:
+            old = book.cells[k]
+            book.cells[k] = Cell(cell.sheet, k[1], k[2], cell.formula, old.value, old.kind, True, cell.ref)
 
 
 ANCHOR = re.compile(r"_xlfn\.ANCHORARRAY\(\s*((?:'(?:[^']|'')+'|[A-Za-z0-9_.]+)!)?\$?([A-Za-z]{1,3})\$?([0-9]+)\s*\)")

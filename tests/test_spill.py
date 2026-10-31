@@ -88,3 +88,13 @@ def test_a_block_over_other_sheets(tmp_path):
     _, bad = check(tmp_path, {"C1": ("{=T!A1:A2+U!A1:A2}", 11.0, "C1:C2"), "C2": 22.0},
                    {"T": {"A1": 1.0, "A2": 2.0}, "U": {"A1": 10.0, "A2": 20.0}})
     assert bad == {}
+
+
+def test_a_block_never_overwrites_another_formula_nor_builds_cells_the_file_lacks(tmp_path):
+    # a crafted ref: a block over a cell with its own formula, and one as big as the sheet
+    verdicts, bad = check(tmp_path, {
+        "C1": ("{=A1:A3*2}", 2.0, "C1:C3"), "C2": 4.0, "C3": ("=A3*100", 300.0),
+        "E1": ("{=A1:A3}", 1.0, "E1:XFD1048576"), "E2": 2.0})
+    assert verdicts[("S", 3, 3)].status == "PASS"  # C3 keeps its own formula
+    assert "overlaps" in bad[("S", 1, 3)][3] and ("S", 2, 3) not in verdicts  # the block is not read
+    assert verdicts[("S", 2, 5)].status == "PASS" and ("S", 3, 5) not in verdicts  # only the cells the file has
