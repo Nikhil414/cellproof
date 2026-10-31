@@ -23,8 +23,8 @@ STALE_REASON = ("the lookup table's values changed after the workbook was transl
                 "out of date: re-run cellproof")
 UNCHECKED = "#UNCHECKED"  # nor this: an edge case of a function whose Excel answer was never checked in real Excel
 UNCHECKED_REASON = ("an edge case of this function (like zero periods, a rate of -100% or less, a payment type other "
-                    "than 0 or 1, a k that is not a whole number, or an error in the range) whose Excel answer has not "
-                    "been checked against real Excel yet")
+                    "than 0 or 1, a k that is not a whole number, an error in the range, or INDEX of a whole row or column "
+                    "outside an array formula) whose Excel answer has not been checked against real Excel yet")
 SETTINGS = {LOCALE: LOCALE_REASON, PLATFORM: PLATFORM_REASON, EARLY1900: EARLY1900_REASON,
             STALE: STALE_REASON, UNCHECKED: UNCHECKED_REASON}  # reported as UNRESOLVED
 Type = Literal["num", "txt", "bool", "blank", "err", "any"]

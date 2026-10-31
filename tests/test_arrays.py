@@ -83,7 +83,7 @@ def test_array_elements_carry_excel_s_errors():
         ("e", None, "#VALUE!"), ("e", None, "#N/A"), ("e", None, "#VALUE!"), ("e", None, "#DIV/0!")]
 
 
-def test_single_cell_array_formulas_compile_and_multi_cell_ones_do_not():
+def test_single_cell_and_block_array_formulas_compile():
     from cellproof.reader import load
     from xlsxkit import write_xlsx
     import tempfile
@@ -92,12 +92,13 @@ def test_single_cell_array_formulas_compile_and_multi_cell_ones_do_not():
         wb = Path(tmp) / "b.xlsx"
         write_xlsx(wb, {"S": {"A1": 1, "B1": 10, "A2": 2, "B2": 20, "A3": 3, "B3": 30,
                               "F1": ("{=SUM(A1:A3*B1:B3)}", 140),                 # one cell: evaluated as a whole
-                              "G1": ("{=A1:A3*B1:B3}", 10, "G1:G3")}})            # a block: needs spill support
+                              "G1": ("{=A1:A3*B1:B3}", 10, "G1:G3"), "G2": 40, "G3": 90}})  # a block, per cell
         book = load(wb)
         compiled = compile_book(book)
-        assert compiled.unresolved[("S", 1, 7)] == "array formula over several cells"
+        assert compiled.unresolved == {}
         got = execute(book, compiled)
         assert got[("S", 1, 6)] == N(140)
+        assert [got[("S", r, 7)] for r in (1, 2, 3)] == [N(10), N(40), N(90)]
 
 
 def test_if_over_ranges_in_aggregates():

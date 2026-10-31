@@ -155,8 +155,8 @@ def test_index_with_a_negative_row_or_column_is_value_error():
     # pycel lookup.xlsx (Excel-saved): INDEX($B$2:$F$6, 1, -1) and INDEX({...}, -1, 2) are #VALUE!, not #REF!
     s = {"A1": 1.0, "A2": 2.0, "B1": 3.0, "B2": 4.0}
     got = run([("=INDEX(S!A1:B2,1,-1)", "#VALUE!"), ("=INDEX(S!A1:B2,-1,2)", "#VALUE!"),
-               ("=INDEX(S!A1:B2,1,3)", "#REF!"), ("=INDEX(S!A1:B2,-0.5,1)", "#REF!")])
-    assert got == [E("#VALUE!"), E("#VALUE!"), E("#REF!"), E("#REF!")]
+               ("=INDEX(S!A1:B2,1,3)", "#REF!"), ("=INDEX(S!A1:B2,-0.5,1)", "#UNCHECKED")])
+    assert got == [E("#VALUE!"), E("#VALUE!"), E("#REF!"), E("#UNCHECKED")]  # -0.5 truncates to 0: a whole column
 
 
 def test_switch_reads_an_empty_cell_as_zero():
@@ -169,9 +169,10 @@ def test_switch_reads_an_empty_cell_as_zero():
 
 def test_a_range_where_one_value_is_expected_in_an_array_formula_is_not_intersected():
     # formulas test.xlsx (Excel-saved): {=MONTH(I6:J6)} in one cell is MONTH of the first element (array
-    # evaluation), not implicit intersection's #VALUE! - until arrays are evaluated there it is UNRESOLVED
+    # evaluation), not implicit intersection's #VALUE!
     book = _cse(book_of({"S": {"A1": 31000.0, "B1": 32000.0, "C5": ("=MONTH(A1:B1)", 11.0),
                                "C6": ("=SUM(A1:B1*2)", 126000.0)}}), ("S", 5, 3), ("S", 6, 3))
     compiled = compile_book(book)
-    assert "array formula" in compiled.unresolved[("S", 5, 3)]
-    assert ("S", 6, 3) not in compiled.unresolved  # element-wise inside an aggregate still compiles
+    got = execute(book, compiled)
+    assert compiled.unresolved == {}
+    assert got[("S", 5, 3)] == N(11) and got[("S", 6, 3)] == N(126000)

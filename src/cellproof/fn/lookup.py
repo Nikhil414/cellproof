@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 
-from cellproof.expr import CELLS, NO_ERR, STALE, Expr, any_of, errs, lit_str, num, unify_all, where_area
+from cellproof.expr import CELLS, NO_ERR, STALE, UNCHECKED, Expr, any_of, errs, lit_str, num, unify_all, where_area
 from cellproof.fn.criteria import like_pattern
 from cellproof.functions import arity, register
 from cellproof.model import Unsupported
@@ -421,6 +421,14 @@ def index(c, args, sheet):
             raise Unsupported("INDEX of a block needs a row and a column")
     else:
         row, col = first, second
+    whole = NO_ERR
+    if c.spill is not None:
+        # a row or column of 0 is the whole column or row; in an array formula each cell takes its element
+        i, j = c.spill
+        row = Expr(f"(CASE WHEN trunc({row.sql}) = 0 THEN {i + 1} ELSE {row.sql} END)", "num", row.err)
+        col = Expr(f"(CASE WHEN trunc({col.sql}) = 0 THEN {j + 1} ELSE {col.sql} END)", "num", col.err)
+    else:  # a whole row or column where one value is expected: not translated
+        whole = f"(CASE WHEN trunc({row.sql}) = 0 OR trunc({col.sql}) = 0 THEN '{UNCHECKED}' END)"
     r = f"(CASE WHEN trunc({row.sql}) BETWEEN 1 AND {height} THEN CAST(trunc({row.sql}) AS BIGINT) END)"
     k = f"(CASE WHEN trunc({col.sql}) BETWEEN 1 AND {width} THEN CAST(trunc({col.sql}) AS BIGINT) END)"
     src = (f"FROM {CELLS} r WHERE r.sheet = {lit_str(area.sheet).sql} "
@@ -431,7 +439,7 @@ def index(c, args, sheet):
     bounds = (f"(CASE WHEN trunc({row.sql}) < 0 OR trunc({col.sql}) < 0 THEN '#VALUE!' "  # real Excel: negative
               f"WHEN {r} IS NULL OR {k} IS NULL OR {r} < 1 OR {r} > {height} OR {k} < 1 OR {k} > {width} THEN '#REF!' END)")
     found = f"(SELECT max(CASE WHEN r.kind = 'e' THEN r.txt END) {src})"
-    return _read(pick, _type_of(c, area, keys), errs(row.err, col.err, bounds, found), "r.")
+    return _read(pick, _type_of(c, area, keys), errs(row.err, col.err, whole, bounds, found), "r.")
 
 
 @register("CHOOSE")

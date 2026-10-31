@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **Array formulas over a block** (legacy Ctrl+Shift+Enter blocks and dynamic-array spills) compile cell by cell:
+  a range where one value is expected takes this cell's element, a range one row (column) high repeats down
+  (across). Rules learned from formulas' Excel-saved test.xlsx: a block cell past the array is #N/A whatever the
+  formula does with errors (`{=IFERROR(G9:Q9,R9)}`), but an IS function's own range is padded with #N/A elements
+  (`{=ISERROR(C8:Q8)}` past Q8 is TRUE); EDATE, EOMONTH, MROUND and YEARFRAC do not take a range there (#VALUE!).
+  A single-cell array formula is its first element (`{=MONTH(I6:J6)}`).
+- **`A1#`** (ANCHORARRAY) is the block Excel spilled A1 into; **`@`** (SINGLE) is implicit intersection.
+- **INDEX with a row or column of 0** is the whole column or row: element by element in an array formula,
+  UNRESOLVED elsewhere (was a wrong #REF!).
+- **Fixes:** SUBSTITUTE with an instance number and cell arguments stopped the run on DuckDB 2.0 (exit 3), and
+  refuses TRUE as the instance like Excel; ISBLANK of a range read its first cell only.
+
 ## 0.3.1 (2026-10-31)
 
 - **WORKDAY with a huge holidays range** (`WORKDAY(A1,5,I1:XFD1048576)`): the days it searched were sized by the

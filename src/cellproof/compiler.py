@@ -15,6 +15,8 @@ from dataclasses import field as dc_field
 from pathlib import Path
 
 import cellproof.fn  # noqa: F401  (registers the function library)
+from openpyxl.utils import range_boundaries
+
 from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, any_of, compare, error, errs, finalize, lit_num, lit_str, num,
                           txt, where_cell)
 from cellproof.functions import FUNCS
@@ -102,6 +104,11 @@ class Keys:
         return self._comp.index.text_cells(a.sheet, a.r1, a.c1, a.r2, a.c2)
 
 
+# Analysis ToolPak functions do not take an array where one value is expected: {arguments that are one value}
+NO_LIFT = {"EDATE": 2, "EOMONTH": 2, "MROUND": 2, "YEARFRAC": 3, "NETWORKDAYS": 2, "WORKDAY": 2}
+NO_LIFT_CHECKED = {"EDATE", "EOMONTH", "MROUND", "YEARFRAC"}  # #VALUE! there, in formulas' Excel-saved test.xlsx
+
+
 class Compiler:
     def __init__(self, book: Book):
         add_arrays(book)
@@ -114,6 +121,8 @@ class Compiler:
         self.at: Key | None = None  # the formula cell being compiled in cell mode (implicit intersection)
         self.ctx: list[str] = []  # what consumes the node being compiled: "op", "fn" or "pass" (PASS_THROUGH)
         self.wid = 0  # unique aliases w1, w2... for the element sources of one array argument
+        self.spill: tuple[int, int] | None = None  # array formula: this cell's (row, col) offset in its block
+        self.spill_dims: list[tuple[int, int]] = []  # sizes of the ranges taken element by element (see _element)
 
     def walias(self) -> str:
         self.wid += 1
@@ -122,24 +131,35 @@ class Compiler:
     def compile_cell(self, cell: Cell) -> Expr:
         if cell.key in self.book.unread:
             raise Unsupported(self.book.unread[cell.key])
-        if cell.array and cell.ref and ":" in cell.ref:
-            raise Unsupported("array formula over several cells")  # spilling into the neighbours is not read yet
         self.at = cell.key
+        self.spill, self.spill_dims = None, []
+        if cell.array:
+            c1, r1, _, _ = range_boundaries(cell.ref or a1(cell.key).split("!")[-1])
+            self.spill = (cell.row - r1, cell.col - c1)
         try:
-            return finalize(self.expr(parse(cell.formula), cell.sheet))
+            e = finalize(self.expr(parse(cell.formula), cell.sheet))
+            if self.spill is not None and self.spill_dims:
+                # real Excel (formulas' test.xlsx): the array is as big as its biggest range, one row (column)
+                # repeating; a block cell beyond it is #N/A whatever the formula does with errors -
+                # {=IFERROR(G9:Q9,R9)} one cell past Q9 is #N/A, not R9
+                rows = max(d[0] for d in self.spill_dims)
+                cols = max(d[1] for d in self.spill_dims)
+                i, j = self.spill
+                if (rows > 1 and i >= rows) or (cols > 1 and j >= cols):
+                    return error("#N/A")
+            return e
         finally:
-            self.at = None
+            self.at, self.spill = None, None
 
     def _intersect(self, area, text: str) -> Expr:
         """A range where one value is expected: Excel's implicit intersection takes the cell in the formula's own row
         (a one-column range) or column (a one-row range), and is #VALUE! when there is none."""
+        if self.spill is not None:
+            return self._element(area)
         if area.sheet in self.book.arrays:
             raise Unsupported("array constant used where one value is expected (needs array evaluation) not supported yet")
         if self.at is None or area.sheet != self.at[0] or (area.r1 != area.r2 and area.c1 != area.c2):
             raise Unsupported(f"range {text} used as a single value")
-        if self.book.cells[self.at].array:  # real Excel: {=MONTH(A1:B1)} evaluates per element, shows the first
-            raise Unsupported(f"range {text} where one value is expected in an array formula (needs array "
-                              "evaluation) not supported yet")
         # real Excel: in MAX(IF(c, A1:A9, 0)) IF hands MAX the whole range; only an operator, a function's own
         # argument or the cell itself takes one value of it
         for consumer in reversed(self.ctx):
@@ -156,6 +176,23 @@ class Compiler:
         if area.r1 == area.r2 and area.c1 <= col <= area.c2:
             return self.cell_value((area.sheet, area.r1, col))
         return error("#VALUE!")
+
+    def element_key(self, area) -> Key | None:
+        """In an array formula a range where one value is expected is taken element by element: this cell's element,
+        the only row (column) of a range one row (column) high for every row (column); None beyond its size, where
+        Excel pads the range with #N/A (so ISERROR there is TRUE: real Excel, formulas' test.xlsx)."""
+        rows, cols = area.r2 - area.r1 + 1, area.c2 - area.c1 + 1
+        i, j = self.spill
+        i, j = (0 if rows == 1 else i), (0 if cols == 1 else j)
+        return None if i >= rows or j >= cols else (area.sheet, area.r1 + i, area.c1 + j)
+
+    def _element(self, area, sized: bool = True) -> Expr:
+        """sized=False: an IS function's own argument, which real Excel pads with #N/A without sizing the array
+        ({=ISERROR(C8:Q8)} past Q8 is TRUE)."""
+        if sized:
+            self.spill_dims.append((area.r2 - area.r1 + 1, area.c2 - area.c1 + 1))
+        key = self.element_key(area)
+        return error("#N/A") if key is None else self.cell_value(key)
 
     def expr(self, node, sheet: str) -> Expr:
         e = self._expr(node, sheet)
@@ -204,6 +241,13 @@ class Compiler:
             fn = FUNCS.get(node.name)
             if fn is None:
                 raise Unsupported(f"function {node.name} not supported yet")
+            if self.spill is not None and node.name in NO_LIFT:
+                ranged = [i for i, a in enumerate(node.args) if i < NO_LIFT[node.name] and isinstance(a, RefNode)
+                          and not resolve(a.text, sheet, self.book).is_single]
+                if ranged and node.name in NO_LIFT_CHECKED:
+                    return error("#VALUE!")  # real Excel: {=EDATE(E9:I9,C9:G9)} is #VALUE! in every cell
+                if ranged:
+                    raise Unsupported(f"{node.name} of a range in an array formula not supported yet")
             return fn(self, node.args, sheet)
         raise Unsupported(f"cannot translate {node!r}")
 

@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import openpyxl
+from openpyxl.utils import get_column_letter
 from openpyxl.utils.datetime import CALENDAR_MAC_1904, to_excel
 from openpyxl.worksheet.formula import ArrayFormula
 
@@ -150,8 +151,62 @@ def load(path: str | Path) -> Book:
                 tuple(col.name for col in t.tableColumns))
     book = Book(cells, [ws.title for ws in fwb.worksheets], names, max_row, fwb.epoch == CALENDAR_MAC_1904, app,
                 tables=tables)
+    spread_blocks(book)
+    rewrite_anchors(book)
     rewrite_tables(book)
     return book
+
+
+def spread_blocks(book: Book) -> None:
+    """An array formula over a block (A1:C3) is written once, on its top-left cell; the other cells of the block hold
+    only Excel's values. Each becomes a formula cell of its own (same text, same block), which the compiler computes
+    as this cell's element of the array."""
+    for key, cell in list(book.cells.items()):
+        if not (cell.array and cell.ref and ":" in cell.ref):
+            continue
+        c1, r1, c2, r2 = openpyxl.utils.range_boundaries(cell.ref)
+        for r in range(r1, r2 + 1):
+            for c in range(c1, c2 + 1):
+                k = (cell.sheet, r, c)
+                if k == key:
+                    continue
+                old = book.cells.get(k)
+                value, kind = (old.value, old.kind) if old is not None else (None, "blank")
+                book.cells[k] = Cell(cell.sheet, r, c, cell.formula, value, kind, True, cell.ref)
+        book.max_row[cell.sheet] = max(book.max_row.get(cell.sheet, 0), r2)
+    book.__dict__.pop("_rows_by_col", None)
+
+
+ANCHOR = re.compile(r"_xlfn\.ANCHORARRAY\(\s*((?:'(?:[^']|'')+'|[A-Za-z0-9_.]+)!)?\$?([A-Za-z]{1,3})\$?([0-9]+)\s*\)")
+
+
+def rewrite_anchors(book: Book) -> None:
+    """A1# (stored _xlfn.ANCHORARRAY(A1)) -> the block Excel spilled A1 into, as the file records it."""
+    for key, cell in list(book.cells.items()):
+        if cell.formula is None or "ANCHORARRAY" not in cell.formula.upper():
+            continue
+
+        def block(m):
+            prefix = m.group(1) or ""
+            sheet = cell.sheet if not prefix else prefix[:-1].strip("'").replace("''", "'")
+            anchor = book.cells.get((sheet, int(m.group(3)), openpyxl.utils.column_index_from_string(m.group(2))))
+            if anchor is None or not anchor.array or anchor.row != _top(anchor) or anchor.col != _left(anchor):
+                raise Unsupported(f"{m.group(0)}: {m.group(2)}{m.group(3)} is not a spilled array")
+            c1, r1, c2, r2 = openpyxl.utils.range_boundaries(anchor.ref or f"{m.group(2)}{m.group(3)}")
+            first, last = f"${get_column_letter(c1)}${r1}", f"${get_column_letter(c2)}${r2}"
+            return prefix + (first if first == last else f"{first}:{last}")
+        try:
+            book.cells[key] = dataclasses.replace(cell, formula=ANCHOR.sub(block, cell.formula))
+        except Unsupported as err:
+            book.unread[key] = str(err)
+
+
+def _top(cell: Cell) -> int:
+    return openpyxl.utils.range_boundaries(cell.ref)[1] if cell.ref else cell.row
+
+
+def _left(cell: Cell) -> int:
+    return openpyxl.utils.range_boundaries(cell.ref)[0] if cell.ref else cell.col
 
 
 def rewrite_tables(book: Book) -> None:

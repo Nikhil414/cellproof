@@ -77,10 +77,20 @@ def ifna(c, args, sheet):
     return pick(f"(NOT {na})", value, fallback, f"(CASE WHEN {na} THEN {fallback.err} ELSE {value.err} END)")
 
 
+def is_arg(c, node, sheet: str) -> Expr:
+    """An IS function's argument: in an array formula a range is padded per element, not sized (see _element)."""
+    if c.spill is not None and isinstance(node, RefNode):
+        from cellproof.refs import resolve
+        area = resolve(node.text, sheet, c.book)
+        if not area.is_single:
+            return c._element(area, sized=False)
+    return c.expr(node, sheet)
+
+
 def _is(name: str, test):
     def fn(c, args, sheet):
         arity(name, args, 1, 1)
-        x = c.expr(args[0], sheet)
+        x = is_arg(c, args[0], sheet)
         return Expr(test(x), "bool", keep_locale(x.err))
     register(name)(fn)
 
@@ -109,7 +119,14 @@ def isblank(c, args, sheet):
     if not isinstance(args[0], RefNode):
         return Expr("FALSE", "bool")  # ISBLANK("") is FALSE: only an empty cell is blank
     area = resolve(args[0].text, sheet, c.book)
-    cell = c.book.cells.get(area.key)
+    key = area.key if area.is_single else None
+    if not area.is_single:
+        if c.spill is None:
+            raise Unsupported("ISBLANK of a range where one value is expected not supported yet")
+        key = c.element_key(area)
+        if key is None:  # beyond the range: Excel's #N/A padding, which is not blank
+            return Expr("FALSE", "bool")
+    cell = c.book.cells.get(key)
     empty = cell is None or (cell.formula is None and cell.kind == "blank")
     return Expr("TRUE" if empty else "FALSE", "bool")
 
@@ -171,3 +188,20 @@ def let(c, args, sheet):
             raise Unsupported(f"LET name {getattr(name, 'text', '?')!r} is not a name")
         env[name.text.lower()] = _subst(args[i + 1], env)
     return c.expr(_subst(args[-1], env), sheet)
+
+
+@register("SINGLE")
+def single(c, args, sheet):
+    """@x (stored _xlfn.SINGLE(x)): implicit intersection, even inside an array formula."""
+    arity("SINGLE", args, 1, 1)
+    a = args[0]
+    if isinstance(a, RefNode):
+        from cellproof.refs import resolve
+        area = resolve(a.text, sheet, c.book)
+        if not area.is_single:
+            spill, c.spill = c.spill, None
+            try:
+                return c._intersect(area, a.text)
+            finally:
+                c.spill = spill
+    return c.expr(a, sheet)

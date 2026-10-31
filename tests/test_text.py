@@ -43,3 +43,15 @@ def test_unsupported_text_forms_say_why():
     unresolved = compile_book(book).unresolved
     assert unresolved[("S", 1, 2)] == "TEXTJOIN keeping the empty cells of a range not supported yet"
     assert unresolved[("S", 2, 2)] == "TEXT format '0.0E+00' not supported yet"
+
+
+def test_substitute_with_an_instance_reads_cells():
+    # DuckDB 2.0 refused list slicing over cell subqueries (Serialization Error), stopping the whole run (exit 3)
+    from cellproof.compiler import compile_book
+    from cellproof.verifier import execute
+    from xlsxkit import book_of
+    book = book_of({"S": {"A1": "a-b-c", "B1": "-", "C1": "+", "D1": 2.0, "D2": ("=D1+1", 3.0),
+                          "E1": ("=SUBSTITUTE(A1,B1,C1,D1)", "a-b+c"), "E2": ("=SUBSTITUTE(A1,B1,C1,D2)", "a-b-c")}})
+    compiled = compile_book(book)
+    got = execute(book, compiled)
+    assert got[("S", 1, 5)] == ("s", None, "a-b+c") and got[("S", 2, 5)] == ("s", None, "a-b-c")

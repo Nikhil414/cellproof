@@ -143,12 +143,17 @@ def substitute(c, args, sheet):
     if len(args) == 3:
         return Expr(f"(CASE WHEN {old.sql} = '' THEN {t.sql} ELSE replace({t.sql}, {old.sql}, {new.sql}) END)", "txt",
                     errs(t.err, old.err, new.err))
-    n = _n(c, args[3], sheet)
-    parts = f"string_split({t.sql}, {old.sql})"
-    k = f"CAST(trunc(least(greatest({n.sql}, 0), len({parts}))) AS BIGINT)"
-    return Expr(f"(CASE WHEN {old.sql} = '' OR len({parts}) <= {k} THEN {t.sql} ELSE "
-                f"array_to_string({parts}[1:{k}], {old.sql}) || {new.sql} || array_to_string({parts}[{k} + 1:], {old.sql}) END)",
-                "txt", errs(t.err, old.err, new.err, n.err, _bad(f"{n.sql} < 1")))
+    n = num_strict(c.expr(args[3], sheet) if args[3] is not None else BLANK)  # real Excel: TRUE is #VALUE!
+    # the arguments are bound once in an inner SELECT: DuckDB 2.0 refuses list slicing over cell subqueries
+    parts = "string_split(st, so)"
+    k = f"CAST(trunc(least(greatest(sn, 0), len({parts}))) AS BIGINT)"
+    # (and wants a constant separator in array_to_string): the k-th match starts after the first k pieces and
+    # k - 1 matches, so the text is cut there
+    at = f"CAST(COALESCE(list_sum(list_transform({parts}[1:{k}], lambda x: length(x))), 0) + ({k} - 1) * length(so) AS BIGINT)"
+    value = (f"(SELECT CASE WHEN so = '' OR len({parts}) <= {k} THEN st ELSE "
+             f"substr(st, 1, {at}) || snew || substr(st, {at} + length(so) + 1) END "
+             f"FROM (SELECT {t.sql} AS st, {old.sql} AS so, {new.sql} AS snew, {n.sql} AS sn) substitute_args)")
+    return Expr(value, "txt", errs(t.err, old.err, new.err, n.err, _bad(f"{n.sql} < 1")))
 
 
 @register("REPLACE")
