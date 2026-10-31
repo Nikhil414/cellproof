@@ -4,10 +4,10 @@ The IS functions look at a value without failing: an error in their argument is 
 """
 from __future__ import annotations
 
-from cellproof.expr import NO_ERR, Expr, as_bool, compare, error, errs, keep_locale, pick, unify, unify_all
+from cellproof.expr import NO_ERR, Expr, as_bool, compare, error, errs, keep_locale, pick, unify, unify_all, ZERO
 from cellproof.functions import arity, logical_args, register
 from cellproof.model import Unsupported
-from cellproof.parser import RefNode
+from cellproof.parser import Binary, Call, Postfix, RefNode, Unary
 from cellproof.refs import resolve
 
 
@@ -44,10 +44,12 @@ def ifs(c, args, sheet):
 def switch(c, args, sheet):
     if len(args) < 3:
         raise Unsupported("SWITCH needs a value and value/result pairs")
-    x = c.expr(args[0], sheet)
+    def zero_if_blank(e):  # real Excel: SWITCH reads an empty cell as 0 (it matches 0, not FALSE or "")
+        return ZERO if e.type == "blank" else e
+    x = zero_if_blank(c.expr(args[0], sheet))
     rest = args[1:]
     default = c.expr(rest[-1], sheet) if len(rest) % 2 else None
-    pairs = [(compare(x, c.expr(rest[i], sheet), "="), c.expr(rest[i + 1], sheet)) for i in range(0, len(rest) - 1, 2)]
+    pairs = [(compare(x, zero_if_blank(c.expr(rest[i], sheet)), "="), c.expr(rest[i + 1], sheet)) for i in range(0, len(rest) - 1, 2)]
     return _chain(pairs, default)
 
 
@@ -128,3 +130,44 @@ def true(c, args, sheet):
 def false(c, args, sheet):
     arity("FALSE", args, 0, 0)
     return Expr("FALSE", "bool")
+
+
+LET_PREFIX = "_xlpm."  # a file stores LET's names as _xlpm.name; a cell reference never starts so
+
+
+def _subst(node, env: dict):
+    """node with every bound name replaced by its value's tree; an inner LET's own names shadow env's."""
+    if isinstance(node, RefNode):
+        return env.get(node.text.lower(), node)
+    if isinstance(node, (Unary, Postfix)):
+        return type(node)(node.op, _subst(node.operand, env))
+    if isinstance(node, Binary):
+        return Binary(node.op, _subst(node.left, env), _subst(node.right, env))
+    if isinstance(node, Call):
+        if node.name != "LET":
+            return Call(node.name, tuple(None if a is None else _subst(a, env) for a in node.args))
+        local, out, args = dict(env), [], node.args
+        for i in range(0, len(args) - 1, 2):
+            out += [args[i], None if args[i + 1] is None else _subst(args[i + 1], local)]  # the value sees env
+            if isinstance(args[i], RefNode):
+                local.pop(args[i].text.lower(), None)  # from here on the name is the inner LET's
+        if len(args) % 2:
+            out.append(None if args[-1] is None else _subst(args[-1], local))
+        return Call("LET", tuple(out))
+    return node
+
+
+@register("LET")
+def let(c, args, sheet):
+    """LET(name1, value1, ..., calculation): each name stands for its value's formula. Substituting the trees
+    (rather than computing each value once) keeps a range a range (LET(r, A1:A9, SUM(r))); formulas have no side
+    effects, so the result is the same, and a value that is never used never shows its error, as in Excel."""
+    if len(args) < 3 or len(args) % 2 == 0:
+        raise Unsupported("LET needs name/value pairs and a calculation")
+    env = {}
+    for i in range(0, len(args) - 1, 2):
+        name = args[i]
+        if not (isinstance(name, RefNode) and name.text.lower().startswith(LET_PREFIX)):
+            raise Unsupported(f"LET name {getattr(name, 'text', '?')!r} is not a name")
+        env[name.text.lower()] = _subst(args[i + 1], env)
+    return c.expr(_subst(args[-1], env), sheet)

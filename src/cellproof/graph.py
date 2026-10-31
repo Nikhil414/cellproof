@@ -56,6 +56,8 @@ def formula_order(book: Book, groups=()) -> tuple[list[Key], dict[Key, str]]:
         shape, texts = lex[key]
         try:
             for text in (texts if shape is not None and shape.parses() else ()):  # = refs(parse(cell.formula))
+                if text[:6].lower() == "_xlpm.":  # a LET name (see fn/logic.py): its value's references count
+                    continue
                 area = resolve(text, cell.sheet, book)
                 if area.is_single:
                     # a read of another member of the same group is not a wait; a cell reading itself still is

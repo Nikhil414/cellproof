@@ -140,3 +140,38 @@ def test_sumproduct_of_different_sizes_returns_an_error_in_its_arrays_first():
                           "D1": ("=SUMPRODUCT(A1:B1,C1:C3)", "#DIV/0!"), "D2": ("=SUMPRODUCT(A2:B2,C1:C3)", "#VALUE!")}})
     got = execute(book, compile_book(book))
     assert got[("S", 1, 4)] == E("#DIV/0!") and got[("S", 2, 4)] == E("#VALUE!")
+
+
+def _cse(book, *keys):
+    """Mark cells as single-cell array (Ctrl+Shift+Enter) formulas, as the reader does."""
+    import dataclasses
+    from cellproof.model import a1
+    for k in keys:
+        book.cells[k] = dataclasses.replace(book.cells[k], array=True, ref=a1(k).split("!")[-1])
+    return book
+
+
+def test_index_with_a_negative_row_or_column_is_value_error():
+    # pycel lookup.xlsx (Excel-saved): INDEX($B$2:$F$6, 1, -1) and INDEX({...}, -1, 2) are #VALUE!, not #REF!
+    s = {"A1": 1.0, "A2": 2.0, "B1": 3.0, "B2": 4.0}
+    got = run([("=INDEX(S!A1:B2,1,-1)", "#VALUE!"), ("=INDEX(S!A1:B2,-1,2)", "#VALUE!"),
+               ("=INDEX(S!A1:B2,1,3)", "#REF!"), ("=INDEX(S!A1:B2,-0.5,1)", "#REF!")])
+    assert got == [E("#VALUE!"), E("#VALUE!"), E("#REF!"), E("#REF!")]
+
+
+def test_switch_reads_an_empty_cell_as_zero():
+    # pycel logical.xlsx (Excel-saved): SWITCH(FALSE, <empty>, "match") and SWITCH(<empty>, "", "match") are #N/A,
+    # SWITCH(0, <empty>, "match") and SWITCH(<empty>, 0, "match") are "match" - unlike =, where empty is like FALSE
+    got = run([('=SWITCH(S!A8,S!A4,"match")', "#N/A"), ('=SWITCH(S!A4,"","match")', "#N/A"),
+               ('=SWITCH(S!A9,S!A4,"match")', "match"), ('=SWITCH(S!A4,0,"match")', "match")])
+    assert got == [E("#N/A"), E("#N/A"), ("s", None, "match"), ("s", None, "match")]
+
+
+def test_a_range_where_one_value_is_expected_in_an_array_formula_is_not_intersected():
+    # formulas test.xlsx (Excel-saved): {=MONTH(I6:J6)} in one cell is MONTH of the first element (array
+    # evaluation), not implicit intersection's #VALUE! - until arrays are evaluated there it is UNRESOLVED
+    book = _cse(book_of({"S": {"A1": 31000.0, "B1": 32000.0, "C5": ("=MONTH(A1:B1)", 11.0),
+                               "C6": ("=SUM(A1:B1*2)", 126000.0)}}), ("S", 5, 3), ("S", 6, 3))
+    compiled = compile_book(book)
+    assert "array formula" in compiled.unresolved[("S", 5, 3)]
+    assert ("S", 6, 3) not in compiled.unresolved  # element-wise inside an aggregate still compiles

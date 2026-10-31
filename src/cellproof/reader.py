@@ -1,6 +1,7 @@
 """Load a workbook twice: once for formulas, once for the values Excel saved."""
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import re
 import zipfile
@@ -11,7 +12,8 @@ import openpyxl
 from openpyxl.utils.datetime import CALENDAR_MAC_1904, to_excel
 from openpyxl.worksheet.formula import ArrayFormula
 
-from cellproof.model import Book, Cell, Kind, Value
+from cellproof.model import Book, Cell, Kind, Unsupported, Value
+from cellproof.tables import Table, expand
 
 ERRORS = {"#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A"}
 SUPPORTED = {".xlsx", ".xlsm"}
@@ -138,4 +140,28 @@ def load(path: str | Path) -> Book:
             elif c.data_type == "f":
                 formula = c.value.removeprefix("=")
             cells[(ws.title, c.row, c.column)] = Cell(ws.title, c.row, c.column, formula, value, kind, array, ref)
-    return Book(cells, [ws.title for ws in fwb.worksheets], names, max_row, fwb.epoch == CALENDAR_MAC_1904, app)
+    tables = {}
+    for ws in fwb.worksheets:
+        for t in ws.tables.values():
+            c1, r1, c2, r2 = openpyxl.utils.range_boundaries(t.ref)
+            header = 1 if t.headerRowCount is None else int(t.headerRowCount)
+            tables[(t.displayName or t.name).upper()] = Table(
+                t.displayName or t.name, ws.title, r1, c1, r2, c2, header, int(t.totalsRowCount or 0),
+                tuple(col.name for col in t.tableColumns))
+    book = Book(cells, [ws.title for ws in fwb.worksheets], names, max_row, fwb.epoch == CALENDAR_MAC_1904, app,
+                tables=tables)
+    rewrite_tables(book)
+    return book
+
+
+def rewrite_tables(book: Book) -> None:
+    """Structured references (Sales[Amount]) -> A1 text in every formula; the ones that cannot be are recorded."""
+    for key, cell in list(book.cells.items()):
+        if cell.formula is None or "[" not in cell.formula:
+            continue
+        try:
+            book.cells[key] = dataclasses.replace(cell, formula=expand(cell.formula, book.tables, key))
+        except Unsupported as err:
+            book.unread[key] = str(err)
+        except Exception:  # noqa: BLE001 - openpyxl's tokenizer on text it cannot read: the parser says why later
+            pass

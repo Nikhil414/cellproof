@@ -77,12 +77,18 @@ reader -> regions -> dependency graph -> compiler -> verifier -> dbt emitter -> 
    code.
 6. **Emit** the dbt project and the report.
 
-96 Excel functions are supported: ABS, AND, AVERAGE, AVERAGEIF(S), CEILING, CHAR, CHOOSE, CLEAN, CONCAT(ENATE),
-COUNT, COUNTA, COUNTBLANK, COUNTIF(S), DATE, DATEDIF, DAY, DAYS, DAYS360, EDATE, EOMONTH, EXACT, EXP, FIND, FLOOR,
-HLOOKUP, IF, IFERROR, IFNA, IFS, INDEX, INT, IS* (BLANK, ERR, ERROR, LOGICAL, NA, NUMBER, TEXT), LEFT, LEN, LN, LOG,
-LOG10, LOOKUP, LOWER, MATCH, MAX, MAXIFS, MEDIAN, MID, MIN, MINIFS, MOD, MODE, MONTH, MROUND, NA, NOT, OR, PI, POWER, PRODUCT,
-PROPER, REPLACE, REPT, RIGHT, ROUND(UP/DOWN), SEARCH, SIGN, SQRT, SUBSTITUTE, SUBTOTAL, SUM, SUMIF(S), SUMPRODUCT,
-SWITCH, TEXT, TEXTJOIN, TRIM, TRUE/FALSE, TRUNC, UPPER, VALUE, VLOOKUP, WEEKDAY, XLOOKUP, XOR, YEAR, YEARFRAC.
+121 Excel functions are supported: ABS, AND, AVERAGE, AVERAGEIF(S), CEILING, CHAR, CHOOSE, CLEAN, CONCAT(ENATE),
+COUNT, COUNTA, COUNTBLANK, COUNTIF(S), DATE, DATEDIF, DAY, DAYS, DAYS360, EDATE, EOMONTH, EXACT, EXP, FIND, FLOOR, FV,
+HLOOKUP, IF, IFERROR, IFNA, IFS, INDEX, INT, IS* (BLANK, ERR, ERROR, LOGICAL, NA, NUMBER, TEXT), LARGE, LEFT, LEN, LET,
+LN, LOG, LOG10, LOOKUP, LOWER, MATCH, MAX, MAXIFS, MEDIAN, MID, MIN, MINIFS, MOD, MODE, MONTH, MROUND, NA, NETWORKDAYS,
+NOT, NPER, NPV, OR, PERCENTILE(.INC), PI, PMT, POWER, PRODUCT, PROPER, PV, QUARTILE(.INC), RANK(.EQ), REPLACE, REPT,
+RIGHT, ROUND(UP/DOWN), SEARCH, SIGN, SMALL, SQRT, STDEV(.S/.P/P), SUBSTITUTE, SUBTOTAL, SUM, SUMIF(S), SUMPRODUCT,
+SWITCH, TEXT, TEXTJOIN, TRIM, TRUE/FALSE, TRUNC, UPPER, VALUE, VAR(.S/.P/P), VLOOKUP, WEEKDAY, WORKDAY, XLOOKUP, XOR,
+YEAR, YEARFRAC.
+
+**Excel tables:** structured references (`Sales[Amount]`, `Sales[@Qty]`, `Sales[[#This Row],[Qty]]`, `Sales[#Totals]`,
+`Sales[[Rep]:[Amount]]`) are rewritten to plain references when the file is read, so a calculated table column
+compiles like any column pasted down.
 
 **Speed** (Windows 11 laptop, measured): a 200,000-formula workbook (four formula columns over 50,000 rows, one of them
 a running total) converts and verifies in 26 s, all PASS. 50,000 rows of VLOOKUP into a 1,000-row table: 4.6 s.
@@ -105,7 +111,7 @@ cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each re
   shown.
 - **Not supported:** multi-cell array formulas and dynamic arrays, volatile functions (`NOW`, `TODAY`, `RAND`, `OFFSET`, and
   `INDIRECT` of text built while the sheet runs; `INDIRECT("Sales")` is fine), functions outside the list above,
-  external workbooks, structured table references (`Table1[@Col]`), INDEX used as a reference, the 1904 date system in
+  external workbooks, a structured reference naming several separate columns (`T[[A],[C]]`), INDEX used as a reference, the 1904 date system in
   TEXT date formats.
 - **Ranges where one value is expected** (`=IF(E$3:E$41="F",B$3:B$41)`) take the formula's own row or column, as
   Excel does (implicit intersection). As an aggregate's argument the element-wise answer is compiled instead (see
@@ -121,6 +127,10 @@ cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each re
 - **Who saved the file:** the report warns when it was last saved by another program (LibreOffice, a script): the
   saved values then follow that program's rules. In a file Excel for Mac calculated, `CHAR` above 127 is UNRESOLVED
   (the Mac character set differs).
+- **Edge cases not checked in real Excel yet** are UNRESOLVED with that reason, never guessed: PMT/PV/FV/NPER with
+  zero periods, a rate of -100% or less or a payment type other than 0 or 1; NPV at a rate of -100%; LARGE/SMALL with
+  a k that is not whole; RANK over a range holding an error; NETWORKDAYS/WORKDAY with text or errors among the
+  holidays. NETWORKDAYS.INTL, WORKDAY.INTL, IRR, RATE and the other finance and statistics functions are not in yet.
 - **Some function options:** SUBTOTAL 101-111 (hidden rows), DATEDIF units MD/YM/YD, WEEKDAY types 11-17, TEXT formats
   outside the supported table, COUNT or MEDIAN of values typed into the formula, criteria taken from an empty cell.
 - **Floating point:** a running total becomes a fast window function only when Excel's saved values prove the different

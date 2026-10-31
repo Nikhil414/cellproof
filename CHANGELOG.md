@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Finance:** PMT, PV, FV, NPER, NPV. Microsoft's closed forms; NPV skips text, TRUE/FALSE and empty cells in a
+  reference without spending a period on them (checked against pycel's Excel-saved npv.xlsx).
+- **Statistics:** LARGE, SMALL, RANK(.EQ), STDEV(.S/.P/P), VAR(.S/.P/P), PERCENTILE(.INC), QUARTILE(.INC). Real Excel
+  (formulas' test.xlsx) taught two rules: k's error comes before an error in the range, and QUARTILE checks quart
+  before truncating it (QUARTILE(x, -0.1) is #NUM!).
+- **Working days:** NETWORKDAYS and WORKDAY, with a holidays range.
+- **Excel tables:** structured references (`Sales[Amount]`, `Sales[@Qty]`, `Sales[[#This Row],[Qty]]`, `#All`,
+  `#Data`, `#Headers`, `#Totals`, `Sales[[Rep]:[Amount]]`) are rewritten to A1 references by the reader; a
+  calculated table column compiles as a region.
+- **LET**, nested LETs and a name bound to a range (`LET(r, A1:A9, SUM(r)/COUNT(r))`) included.
+- **Not guessed:** edge cases of the new functions that were never checked in real Excel (zero periods, rate <= -100%,
+  payment type other than 0/1, a k that is not whole, ...) are UNRESOLVED with that reason.
+- **Fixes found by the public corpus** (FAIL 92 -> 16, all 16 explained: 10 in LibreOffice files, 6 last-digit
+  cancellations around NPV): INDEX with a negative row or column is #VALUE!, not #REF!; SWITCH reads an empty cell as
+  0 (it matches 0, not FALSE or ""); a range where one value is expected inside an array formula is UNRESOLVED
+  instead of implicitly intersected (Excel evaluates it per element there).
 - **Array arithmetic in aggregates**, the first slices of array evaluation: `SUM(A1:A10*B1:B10)`,
   `SUMPRODUCT((A1:A9>5)*C1:C9)`, `MAX(IF(A1:A9="x",B1:B9))`, `SUM(IFERROR(A1:A9/B1:B9,0))`, `COUNTA(A1:A9&B1:B9)`,
   `SUM(A1:A9^2)` and friends evaluate element by element like modern Excel - an empty element is 0, text converts

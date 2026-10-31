@@ -94,7 +94,8 @@ def _fixed_reference(args) -> bool:
 
 def _refs(node) -> Iterator[str]:
     if isinstance(node, RefNode):
-        yield node.text
+        if not node.text.lower().startswith("_xlpm."):  # a LET name, as a file stores it: never a reference
+            yield node.text
     elif isinstance(node, (Unary, Postfix)):
         yield from _refs(node.operand)
     elif isinstance(node, Binary):

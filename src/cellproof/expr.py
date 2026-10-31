@@ -21,8 +21,12 @@ EARLY1900_REASON = "YEARFRAC of a date before 1 March 1900, around Excel's 29 Fe
 STALE = "#STALE"  # nor this: a compiled binary search whose table's values changed after translation
 STALE_REASON = ("the lookup table's values changed after the workbook was translated, so its compiled search is "
                 "out of date: re-run cellproof")
+UNCHECKED = "#UNCHECKED"  # nor this: an edge case of a function whose Excel answer was never checked in real Excel
+UNCHECKED_REASON = ("an edge case of this function (like zero periods, a rate of -100% or less, a payment type other "
+                    "than 0 or 1, a k that is not a whole number, or an error in the range) whose Excel answer has not "
+                    "been checked against real Excel yet")
 SETTINGS = {LOCALE: LOCALE_REASON, PLATFORM: PLATFORM_REASON, EARLY1900: EARLY1900_REASON,
-            STALE: STALE_REASON}  # reported as UNRESOLVED
+            STALE: STALE_REASON, UNCHECKED: UNCHECKED_REASON}  # reported as UNRESOLVED
 Type = Literal["num", "txt", "bool", "blank", "err", "any"]
 
 

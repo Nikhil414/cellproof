@@ -46,7 +46,7 @@ def _cell_xml(ref, spec):
     return f'<c r="{ref}"{t}><v>{text}</v></c>'
 
 
-def _sheet_xml(cells):
+def _sheet_xml(cells, parts=0):
     rows = defaultdict(list)
     for ref, spec in cells.items():
         r, c = coordinate_to_tuple(ref)
@@ -54,12 +54,32 @@ def _sheet_xml(cells):
     body = "".join(
         f'<row r="{r}">' + "".join(x for _, x in sorted(cs)) + "</row>" for r, cs in sorted(rows.items())
     )
-    return f'{XML_HEAD}<worksheet xmlns="{MAIN}"><sheetData>{body}</sheetData></worksheet>'
+    tail = ""
+    if parts:
+        tail = f'<tableParts count="{parts}">' + "".join(
+            f'<tablePart r:id="rId{i}"/>' for i in range(1, parts + 1)) + "</tableParts>"
+    return (f'{XML_HEAD}<worksheet xmlns="{MAIN}" xmlns:r="{REL}"><sheetData>{body}</sheetData>{tail}'
+            "</worksheet>")
 
 
-def write_xlsx(path, sheets, names=None):
-    """sheets: {"Sheet": {"A1": 2, "A2": ("=A1*2", 4)}}; names: {"Rate": "'My Sheet'!$A$1"}."""
+def _table_xml(tid, name, ref, columns, totals):
+    cols = "".join(f'<tableColumn id="{i}" name="{escape(c, {chr(34): "&quot;"})}"/>'
+                   for i, c in enumerate(columns, 1))
+    return (f'{XML_HEAD}<table xmlns="{MAIN}" id="{tid}" name="{name}" displayName="{name}" ref="{ref}"'
+            + (f' totalsRowCount="{totals}"' if totals else "")
+            + f'><tableColumns count="{len(columns)}">{cols}</tableColumns></table>')
+
+
+def write_xlsx(path, sheets, names=None, tables=None):
+    """sheets: {"Sheet": {"A1": 2, "A2": ("=A1*2", 4)}}; names: {"Rate": "'My Sheet'!$A$1"};
+    tables: {"Sheet": [("Sales", "A1:C5", ["Rep", "Region", "Amount"], totals_rows)]}."""
     n = len(sheets)
+    tables = tables or {}
+    table_parts, tid = [], 0  # (sheet number, table number, xml)
+    for i, name in enumerate(sheets, 1):
+        for spec in tables.get(name, []):
+            tid += 1
+            table_parts.append((i, tid, _table_xml(tid, *spec)))
     sheet_ct = "".join(
         f'<Override PartName="/xl/worksheets/sheet{i}.xml" '
         'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
@@ -71,7 +91,11 @@ def write_xlsx(path, sheets, names=None):
         '<Default Extension="xml" ContentType="application/xml"/>'
         '<Override PartName="/xl/workbook.xml" '
         'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-        f"{sheet_ct}</Types>"
+        f"{sheet_ct}"
+        + "".join(f'<Override PartName="/xl/tables/table{t}.xml" '
+                  'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>'
+                  for _, t, _ in table_parts)
+        + "</Types>"
     )
     root_rels = (
         f'{XML_HEAD}<Relationships xmlns="{PKG}"><Relationship Id="rId1" '
@@ -98,7 +122,14 @@ def write_xlsx(path, sheets, names=None):
         z.writestr("xl/workbook.xml", workbook)
         z.writestr("xl/_rels/workbook.xml.rels", wb_rels)
         for i, cells in enumerate(sheets.values(), 1):
-            z.writestr(f"xl/worksheets/sheet{i}.xml", _sheet_xml(cells))
+            mine = [(t, xml) for s, t, xml in table_parts if s == i]
+            z.writestr(f"xl/worksheets/sheet{i}.xml", _sheet_xml(cells, len(mine)))
+            if mine:
+                z.writestr(f"xl/worksheets/_rels/sheet{i}.xml.rels", f'{XML_HEAD}<Relationships xmlns="{PKG}">' + "".join(
+                    f'<Relationship Id="rId{k}" Type="{REL}/table" Target="../tables/table{t}.xml"/>'
+                    for k, (t, _) in enumerate(mine, 1)) + "</Relationships>")
+            for t, xml in mine:
+                z.writestr(f"xl/tables/table{t}.xml", xml)
 
 
 def book_of(sheets, names=None) -> Book:

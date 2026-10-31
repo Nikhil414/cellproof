@@ -428,7 +428,8 @@ def index(c, args, sheet):
 
     def pick(value: str, default: str) -> str:  # at most one cell matches; none when it is empty
         return f"COALESCE((SELECT max({value}) {src}), {default})"
-    bounds = f"(CASE WHEN {r} IS NULL OR {k} IS NULL OR {r} < 1 OR {r} > {height} OR {k} < 1 OR {k} > {width} THEN '#REF!' END)"
+    bounds = (f"(CASE WHEN trunc({row.sql}) < 0 OR trunc({col.sql}) < 0 THEN '#VALUE!' "  # real Excel: negative
+              f"WHEN {r} IS NULL OR {k} IS NULL OR {r} < 1 OR {r} > {height} OR {k} < 1 OR {k} > {width} THEN '#REF!' END)")
     found = f"(SELECT max(CASE WHEN r.kind = 'e' THEN r.txt END) {src})"
     return _read(pick, _type_of(c, area, keys), errs(row.err, col.err, bounds, found), "r.")
 

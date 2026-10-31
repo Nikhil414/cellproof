@@ -6,12 +6,13 @@ Excel stores a date as a serial number: 1 = 1900-01-01, and it counts a 29 Febru
 """
 from __future__ import annotations
 
-from cellproof.expr import EARLY1900, NO_ERR, Expr, errs, num, num_strict
+from cellproof.expr import CELLS, EARLY1900, NO_ERR, UNCHECKED, Expr, errs, num, num_strict
+from cellproof.fn.aggregate import _rng
 from cellproof.fn.lookup import int_literal
 from cellproof.fn.text import FORMATS
 from cellproof.functions import arity, register
 from cellproof.model import Unsupported
-from cellproof.parser import Bool, Str
+from cellproof.parser import Bool, RefNode, Str
 
 MAX_SERIAL = 2958465  # 9999-12-31
 
@@ -223,3 +224,63 @@ DATE_FORMATS = {
     "mmmm yyyy": "%B %Y", "ddd": "%a", "dddd": "%A", "dd": "%d", "d": "%-d", "mm": "%m",
 }
 FORMATS.update({k: _date_format(v) for k, v in DATE_FORMATS.items()})
+
+
+def _holidays(c, args, sheet: str, name: str, at: int):
+    """(the holidays range or None, its error parts). Text, TRUE/FALSE or an error in it is UNCHECKED: what Excel
+    does with them was not checked."""
+    if len(args) <= at or args[at] is None:
+        return None, []
+    if not isinstance(args[at], RefNode):
+        raise Unsupported(f"{name} with holidays typed into the formula not supported yet")
+    rng = _rng(c, args[at], sheet)
+    odd = (f"(CASE WHEN EXISTS (SELECT 1 FROM {CELLS} WHERE {rng.where()} AND kind IN ('s', 'b', 'e')) "
+           f"THEN '{UNCHECKED}' END)")
+    return rng, [odd]
+
+
+def _holiday_serials(rng) -> str:
+    return f"SELECT DISTINCT floor(num) AS h FROM {CELLS} WHERE {rng.where()} AND kind = 'n'"
+
+
+def _weekdays_to(n: str) -> str:
+    """How many Mondays-Fridays among serials 1..n+7 (serial mod 7: 0 Saturday, 1 Sunday); n >= -1."""
+    m = f"({n} + 7)"
+    return f"(5 * floor({m} / 7) + GREATEST(0, ({m} % 7) - 1))"
+
+
+@register("NETWORKDAYS")
+def networkdays(c, args, sheet):
+    """Mondays-Fridays from start to end, both counted, less holidays on them; negative when end is earlier."""
+    arity("NETWORKDAYS", args, 2, 3)
+    a, b = _serial(c, args[0], sheet), _serial(c, args[1], sheet)
+    rng, odd = _holidays(c, args, sheet, "NETWORKDAYS", 2)
+    lo, hi = f"LEAST({a.sql}, {b.sql})", f"GREATEST({a.sql}, {b.sql})"
+    off = "0" if rng is None else (f"(SELECT COUNT(*) FROM ({_holiday_serials(rng)}) hol "
+                                   f"WHERE h BETWEEN {lo} AND {hi} AND CAST(h AS BIGINT) % 7 NOT IN (0, 1))")
+    count = f"({_weekdays_to(hi)} - {_weekdays_to(f'{lo} - 1')} - {off})"
+    return Expr(f"CAST(CASE WHEN {a.sql} <= {b.sql} THEN {count} ELSE -{count} END AS DOUBLE)", "num",
+                errs(a.err, b.err, *odd))
+
+
+@register("WORKDAY")
+def workday(c, args, sheet):
+    """The serial `days` working days after start (before, when negative); days is truncated; WORKDAY(s, 0) is s."""
+    arity("WORKDAY", args, 2, 3)
+    s = _serial(c, args[0], sheet)
+    d = num(c.expr(args[1], sheet))
+    rng, odd = _holidays(c, args, sheet, "WORKDAY", 2)
+    extra = 0 if rng is None else 2 * (rng.area.r2 - rng.area.r1 + 1) * (rng.area.c2 - rng.area.c1 + 1)
+    n = f"CAST(abs(trunc({d.sql})) AS BIGINT)"
+    step = f"(CASE WHEN {d.sql} < 0 THEN -1 ELSE 1 END)"
+    span = f"({n} * 7 // 5 + 7 + {extra})"  # enough calendar days to hold n working days and every holiday
+    start = f"CAST({s.sql} AS BIGINT)"
+    skip = "" if rng is None else f" AND x NOT IN ({_holiday_serials(rng)})"
+    days = (f"SELECT x, row_number() OVER (ORDER BY x * {step}) AS rn FROM "
+            f"unnest(range({start} + {step}, {start} + {step} * ({span} + 1), {step})) wd(x) "
+            f"WHERE x % 7 NOT IN (0, 1){skip}")
+    found = f"(SELECT CAST(x AS DOUBLE) FROM ({days}) wd_days WHERE rn = {n})"
+    ok = f"(abs({d.sql}) <= {MAX_SERIAL})"
+    value = f"(CASE WHEN NOT {ok} THEN NULL WHEN trunc({d.sql}) = 0 THEN {s.sql} ELSE {found} END)"
+    return Expr(value, "num", errs(s.err, d.err, *odd,
+                                   f"(CASE WHEN NOT {ok} OR {value} < 0 OR {value} > {MAX_SERIAL} THEN '#NUM!' END)"))

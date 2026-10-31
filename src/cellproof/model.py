@@ -54,6 +54,8 @@ class Book:
     date1904: bool = False  # the workbook counts dates from 1904 (old Mac Excel)
     app: str = ""  # the program that last saved the file (docProps/app.xml), "" when the file does not say
     arrays: set[str] = field(default_factory=set)  # hidden sheets of array constants (cellproof.parser.ARRAY_SHEET)
+    tables: dict = field(default_factory=dict)  # TABLE NAME (upper) -> cellproof.tables.Table
+    unread: dict = field(default_factory=dict)  # formula cell -> why its structured references were not rewritten
 
     @cached_property
     def _rows_by_col(self) -> dict[tuple[str, int], list[int]]:

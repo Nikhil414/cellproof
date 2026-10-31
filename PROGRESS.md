@@ -1,6 +1,6 @@
 # cellproof: progress
 
-Last updated: 2026-10-20.
+Last updated: 2026-10-31.
 
 ## State
 
@@ -21,11 +21,22 @@ Everything below is on `main`, built test-first, each piece reviewed by a fresh 
 | Impact-ranked unresolveds | the report groups UNRESOLVED cells by the reason to fix first ("Where to start"): the compiler records which unresolved cell stopped a compile (`Unsupported.dep`), each chained cell is attributed to the first blocker its chain reaches, reasons are ranked by reach; report.json gains `unresolved_groups` and per-cell `blocked_by` |
 | Approximate lookups unsorted | MATCH type 1 / VLOOKUP / HLOOKUP / LOOKUP over a plain numeric input table out of order compiles Excel's binary-search path (a decision tree of probes, depths and x-intervals, one aggregate in SQL; verified differentially against the bisection and against real Excel answers). A changed table is #STALE -> UNRESOLVED, never a stale answer. Type -1 and text stay UNRESOLVED (Excel's rule there is not derivable; LibreOffice differs). examples/functions.xlsx: 4 UNRESOLVED -> 2 |
 | Arrays slices 1+2 | element-wise arrays in the aggregates: `SUM(A1:A10*B1:B10)`, `SUMPRODUCT((A1:A9>5)*C1:C9)`, `MAX(IF(A1:A9="x",B1:B9))`. An array argument is one relation with the cells table's columns (a row per element position, blanks and all), which SUM/PRODUCT/MAX/MIN/AVERAGE/COUNT/COUNTA/SUMPRODUCT read like a range; IF picks one element per position (the untaken branch's error never shows). Text converts in arithmetic ("3"->3, else #VALUE!); comparisons rank numbers < text < TRUE/FALSE case-insensitively. SUM moved from functions.py onto the aggregate machinery. A single-cell CSE formula compiles (`Cell.ref` kept from the file); multi-cell stays UNRESOLVED. Plain-entered range arithmetic/IF as an aggregate argument now follows modern Excel, not the legacy intersection - a legacy-saved workbook can FAIL there (a real user workbook's MAX(IF(...))=99 artifact surfaces as a FAIL with both values shown). Next: IFERROR/IFS/CHOOSE over arrays, & and ^ on arrays, then legacy multi-cell array formulas and dynamic arrays |
+| 0.3.0 functions | PMT, PV, FV, NPER, NPV; LARGE, SMALL, RANK(.EQ), STDEV/VAR (S/P), PERCENTILE(.INC), QUARTILE(.INC); NETWORKDAYS, WORKDAY. Edge cases not checked in real Excel are an UNCHECKED marker (UNRESOLVED), like LOCALE |
+| Excel tables | structured references rewritten to A1 text by the reader (`tables.py`); [#This Row] becomes a same-row reference, so a calculated column is a region |
+| LET | names (stored `_xlpm.x`) substituted by their value's tree, shadowing respected; the graph skips them as dependencies |
 | Open source | MIT license, README with limits, SECURITY.md, CI on Windows/macOS/Linux x Python 3.10-3.13 |
 
-Tests: about 437 (dbt build included), plus 3 workbooks saved by real Excel that all PASS (4 cells UNRESOLVED on
+Tests: 492 (+10 skipped without dbt/Excel files), plus 3 workbooks saved by real Excel that all PASS (4 cells UNRESOLVED on
 purpose). Public on GitHub (one-commit history start). 0.1.0 was released as `unexcel`; 0.2.0 (2026-10-19) and 0.2.1 (2026-10-20) are on PyPI as `cellproof` (see CHANGELOG.md).
 A user's practice workbook: 3 PASS / 47 UNRESOLVED -> 48 PASS / 0 FAIL / 2 UNRESOLVED.
+
+## Public test workbooks (2026-10-31)
+
+After 0.3.0's functions, tables and LET: 7,528 PASS, 16 FAIL, 16,104 UNRESOLVED (was 7,108 / 92 / 16,448 on 0.2.2 +
+arrays). The 16 FAIL: 10 in LibreOffice files, 6 in pycel's npv.xlsx where `=C7-A7` subtracts two numbers equal to
+1e-13 relative (NPV's last digits differ from Excel's own arithmetic; every NPV cell itself PASSes). The 82 new FAILs
+the arrays work exposed were INDEX with a negative index, SWITCH with an empty cell and ranges inside single-cell
+array formulas - all fixed.
 
 ## Public test workbooks (2026-10-19)
 

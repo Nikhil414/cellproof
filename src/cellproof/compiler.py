@@ -120,6 +120,8 @@ class Compiler:
         return f"w{self.wid}"
 
     def compile_cell(self, cell: Cell) -> Expr:
+        if cell.key in self.book.unread:
+            raise Unsupported(self.book.unread[cell.key])
         if cell.array and cell.ref and ":" in cell.ref:
             raise Unsupported("array formula over several cells")  # spilling into the neighbours is not read yet
         self.at = cell.key
@@ -135,6 +137,9 @@ class Compiler:
             raise Unsupported("array constant used where one value is expected (needs array evaluation) not supported yet")
         if self.at is None or area.sheet != self.at[0] or (area.r1 != area.r2 and area.c1 != area.c2):
             raise Unsupported(f"range {text} used as a single value")
+        if self.book.cells[self.at].array:  # real Excel: {=MONTH(A1:B1)} evaluates per element, shows the first
+            raise Unsupported(f"range {text} where one value is expected in an array formula (needs array "
+                              "evaluation) not supported yet")
         # real Excel: in MAX(IF(c, A1:A9, 0)) IF hands MAX the whole range; only an operator, a function's own
         # argument or the cell itself takes one value of it
         for consumer in reversed(self.ctx):
