@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-10-31)
 
 - **Array formulas over a block** (legacy Ctrl+Shift+Enter blocks and dynamic-array spills) compile cell by cell:
   a range where one value is expected takes this cell's element, a range one row (column) high repeats down
@@ -8,6 +8,16 @@
   formula does with errors (`{=IFERROR(G9:Q9,R9)}`), but an IS function's own range is padded with #N/A elements
   (`{=ISERROR(C8:Q8)}` past Q8 is TRUE); EDATE, EOMONTH, MROUND and YEARFRAC do not take a range there (#VALUE!).
   A single-cell array formula is its first element (`{=MONTH(I6:J6)}`).
+- **FILTER, SORT, UNIQUE** spill their results and nest in each other (`SORT(UNIQUE(FILTER(...)))`): FILTER by rows
+  or columns with if_empty, SORT by one key (ascending or descending, equal keys keep their order), UNIQUE with
+  exactly_once, text compared ignoring case. A dynamic spill (Excel's cm mark on the cell, now read) whose result
+  is not exactly as big as the block Excel saved shows #SPILL! in its first cell, a FAIL. Not guessed (UNRESOLVED):
+  an empty FILTER without if_empty (#CALC! in Microsoft's docs, #VALUE! in an Excel-saved file), SORT keys that
+  are empty, errors or text with punctuation, UNIQUE over empty cells or errors.
+- **Excel 365 error codes** (#CALC!, #SPILL!, #FIELD!, ...) are read as errors; functions stored `_xlfn._xlws.` are
+  recognised.
+- **Security:** an array block in a crafted file can no longer overwrite another cell's formula or create cells the
+  file does not hold.
 - **`A1#`** (ANCHORARRAY) is the block Excel spilled A1 into; **`@`** (SINGLE) is implicit intersection.
 - **INDEX with a row or column of 0** is the whole column or row: element by element in an array formula,
   UNRESOLVED elsewhere (was a wrong #REF!).
