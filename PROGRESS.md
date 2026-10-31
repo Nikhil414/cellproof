@@ -29,7 +29,7 @@ Everything below is on `main`, built test-first, each piece reviewed by a fresh 
 | Open source | MIT license, README with limits, SECURITY.md, CI on Windows/macOS/Linux x Python 3.10-3.13 |
 
 Tests: 492 (+10 skipped without dbt/Excel files), plus 3 workbooks saved by real Excel that all PASS (4 cells UNRESOLVED on
-purpose). Public on GitHub (one-commit history start). 0.1.0 was released as `unexcel`; 0.2.x, 0.3.0, 0.3.1 and 0.4.0 (2026-10-31) are on PyPI as `cellproof` (see CHANGELOG.md).
+purpose). Public on GitHub (one-commit history start). 0.1.0 was released as `unexcel`; 0.2.x, 0.3.0, 0.3.1, 0.4.0 and 0.5.0 (2026-10-31) are on PyPI as `cellproof` (see CHANGELOG.md).
 A user's practice workbook: 3 PASS / 47 UNRESOLVED -> 48 PASS / 0 FAIL / 2 UNRESOLVED.
 
 ## Public test workbooks (2026-10-31)
