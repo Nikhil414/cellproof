@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 (2026-10-31)
+
+- **WORKDAY with a huge holidays range** (`WORKDAY(A1,5,I1:XFD1048576)`): the days it searched were sized by the
+  range's area, so one workbook could make DuckDB fail or exhaust memory. The search now covers 2 days per holiday
+  actually in the range, never past Excel's last date.
+
 ## 0.3.0 (2026-10-31)
 
 - **Finance:** PMT, PV, FV, NPER, NPV. Microsoft's closed forms; NPV skips text, TRUE/FALSE and empty cells in a
