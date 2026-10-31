@@ -4,9 +4,9 @@ The IS functions look at a value without failing: an error in their argument is 
 """
 from __future__ import annotations
 
-from cellproof.expr import NO_ERR, Expr, as_bool, compare, error, errs, keep_locale, pick, unify, unify_all, ZERO
+from cellproof.expr import NO_ERR, ZERO, Expr, as_bool, compare, error, errs, keep_locale, num, num_strict, pick, unify, unify_all
 from cellproof.functions import arity, logical_args, register
-from cellproof.model import Unsupported
+from cellproof.model import Unsupported, a1
 from cellproof.parser import Binary, Call, Postfix, RefNode, Unary
 from cellproof.refs import resolve
 
@@ -205,3 +205,71 @@ def single(c, args, sheet):
             finally:
                 c.spill = spill
     return c.expr(a, sheet)
+
+
+def _position(name: str, which: int):
+    """ROW/COLUMN: of the formula's own cell, of one cell, or - in an array formula - of this cell's element."""
+    def fn(c, args, sheet):
+        arity(name, args, 0, 1)
+        if not args or args[0] is None:
+            if c.at is None:
+                raise Unsupported(f"{name}() in a block of rows not supported yet (stays row by row)")
+            return Expr(f"CAST({c.at[which]} AS DOUBLE)", "num")
+        a = args[0]
+        if not isinstance(a, RefNode):
+            raise Unsupported(f"{name} of something other than a reference")
+        if c.rowrefs is not None and a.text in c.rowrefs:
+            raise Unsupported(f"{name} of a reference that moves with the row not supported yet")
+        from cellproof.refs import resolve
+        area = resolve(a.text, sheet, c.book)
+        if area.is_single:
+            return Expr(f"CAST({area.key[which]} AS DOUBLE)", "num")
+        if c.spill is None:  # legacy Excel takes the first row/column, modern Excel spills: not checked
+            raise Unsupported(f"{name} of a range outside an array formula not supported yet")
+        # real Excel (formulas' test.xlsx): ROW of a range is one column of its row numbers, COLUMN one row of its
+        # column numbers, so they repeat across (down) the block
+        first, count = (area.r1, area.r2 - area.r1 + 1) if which == 1 else (area.c1, area.c2 - area.c1 + 1)
+        at = c.spill[0] if which == 1 else c.spill[1]
+        c.spill_dims.append((count, 1) if which == 1 else (1, count))
+        at = 0 if count == 1 else at
+        return error("#N/A") if at >= count else Expr(f"CAST({first + at} AS DOUBLE)", "num")
+    register(name)(fn)
+
+
+_position("ROW", 1)
+_position("COLUMN", 2)
+
+
+@register("N")
+def n_(c, args, sheet):
+    """A number (dates are numbers) is itself, TRUE 1, FALSE 0, text 0, an error that error."""
+    arity("N", args, 1, 1)
+    a = args[0]
+    if isinstance(a, RefNode):
+        from cellproof.refs import resolve
+        area = resolve(a.text, sheet, c.book)
+        if not area.is_single:
+            if c.spill is None:
+                raise Unsupported("N of a range outside an array formula not supported yet")
+            # real Excel (formulas' test.xlsx): N of a range is N of its first cell, in every cell of the block
+            a = RefNode(f"'{area.sheet.replace(chr(39), chr(39) * 2)}'!{a1((area.sheet, area.r1, area.c1)).split('!')[-1]}")
+    x = c.expr(a, sheet)
+    if x.type in ("num", "blank"):
+        return num(x)
+    if x.type == "bool":
+        return Expr(f"CAST({x.sql} AS DOUBLE)", "num", x.err)
+    if x.type in ("txt", "err"):
+        return Expr("CAST(0 AS DOUBLE)", "num", x.err)
+    return Expr(f"(CASE WHEN {x.kind} = 's' THEN CAST(0 AS DOUBLE) ELSE {x.sql} END)", "num", x.err)
+
+
+def _parity(name: str, odd: bool):
+    def fn(c, args, sheet):
+        arity(name, args, 1, 1)
+        x = num_strict(c.expr(args[0], sheet))  # an Analysis ToolPak function: TRUE/FALSE is #VALUE!
+        return Expr(f"(abs(trunc({x.sql})) % 2 {'=' if odd else '<>'} 1)", "bool", x.err)
+    register(name)(fn)
+
+
+_parity("ISODD", True)
+_parity("ISEVEN", False)

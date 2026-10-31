@@ -106,8 +106,9 @@ class Keys:
 
 
 # Analysis ToolPak functions do not take an array where one value is expected: {arguments that are one value}
-NO_LIFT = {"EDATE": 2, "EOMONTH": 2, "MROUND": 2, "YEARFRAC": 3, "NETWORKDAYS": 2, "WORKDAY": 2}
-NO_LIFT_CHECKED = {"EDATE", "EOMONTH", "MROUND", "YEARFRAC"}  # #VALUE! there, in formulas' Excel-saved test.xlsx
+NO_LIFT = {"EDATE": 2, "EOMONTH": 2, "MROUND": 2, "YEARFRAC": 3, "NETWORKDAYS": 2, "WORKDAY": 2, "ISEVEN": 1,
+           "ISODD": 1}
+NO_LIFT_CHECKED = {"EDATE", "EOMONTH", "MROUND", "YEARFRAC", "ISEVEN", "ISODD"}  # #VALUE!: formulas' test.xlsx
 
 
 class Compiler:
@@ -412,7 +413,7 @@ def compile_book(book: Book, regions: bool = True) -> Compiled:
     def add_spill(cell) -> bool:
         """FILTER/SORT/UNIQUE/... spilled into a block: one batch for the whole block (fn/dynamic.spill_batch)."""
         nonlocal weight
-        if not cell.array:
+        if not cell.array or cell.key in book.unread:  # compile_cell gives the reason
             return False
         try:
             tree = parse(cell.formula)

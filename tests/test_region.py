@@ -179,7 +179,7 @@ def test_a_row_dependent_function_never_yields_a_region_value():
     book = book_of({"S": spec})
     scan = find_regions(book)
     batch, rejected = compile_region(Compiler(book), scan.regions[0])
-    assert rejected == {2: "function ROW not supported yet"}
+    assert rejected == {2: "ROW() in a block of rows not supported yet (stays row by row)"}
     assert all(s.key[2] != 2 for s in batch)
 
 

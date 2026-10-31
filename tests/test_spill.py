@@ -98,3 +98,14 @@ def test_a_block_never_overwrites_another_formula_nor_builds_cells_the_file_lack
     assert verdicts[("S", 3, 3)].status == "PASS"  # C3 keeps its own formula
     assert "overlaps" in bad[("S", 1, 3)][3] and ("S", 2, 3) not in verdicts  # the block is not read
     assert verdicts[("S", 2, 5)].status == "PASS" and ("S", 3, 5) not in verdicts  # only the cells the file has
+
+
+def test_row_and_column_of_a_range_in_an_array_formula(tmp_path):
+    # formulas' test.xlsx (Excel-saved): ROW of a range is one column of row numbers (it repeats across), COLUMN
+    # one row; N of a range is N of its first cell; ISODD/ISEVEN do not take a range there (#VALUE!)
+    _, bad = check(tmp_path, {"P1": ("{=ROW(A1:A3)*10}", 10.0, "P1:P3"), "P2": 20.0, "P3": 30.0,
+                              "Q1": ("{=COLUMN(E1:G1)}", 5.0, "Q1:S1"), "R1": 6.0, "S1": 7.0,
+                              "P5": ("{=ROW(E1:G1)}", 1.0, "P5:R6"), "Q5": 1.0, "R5": 1.0, "P6": 1.0, "Q6": 1.0,
+                              "R6": 1.0, "P8": ("{=N(A1:A3)}", 1.0, "P8:Q8"), "Q8": 1.0,
+                              "P9": ("{=ISODD(A1:A3)}", "#VALUE!", "P9:P10"), "P10": "#VALUE!"})
+    assert bad == {}

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0 (2026-10-31)
+
+- **A batch DuckDB rejects no longer stops the run:** its cells are UNRESOLVED with DuckDB's message, the book is
+  compiled again so every cell reading them is UNRESOLVED too (none can read a missing value), and the report is
+  written. The exit code is still 3: it is a bug in cellproof, please report it.
+- **ROW, COLUMN** (of the formula's cell, of a cell, and in an array formula of a range: one column of row numbers,
+  one row of column numbers - real Excel), **CODE** (Windows-1252, CHAR's inverse; a character outside it, or above
+  127 in a file Excel for Mac calculated, is UNRESOLVED), **UNICODE, UNICHAR, N** (of a range in an array formula:
+  its first cell), **ISODD, ISEVEN** (no ranges in an array formula: #VALUE!, like EDATE).
+- **IRR and RATE** by Newton's method in SQL (a recursive CTE). Not guessed: cash flows with several sign changes
+  (several roots), an error among IRR's cells, a RATE whose answer is 0, nper not a positive whole number.
+
 ## 0.5.0 (2026-10-31)
 
 - **FILTER, SORT, UNIQUE inside other calculations:** `SUM(FILTER(...))`, `COUNTA(UNIQUE(...))`, AVERAGE, MIN, MAX,

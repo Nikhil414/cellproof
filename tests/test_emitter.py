@@ -248,7 +248,7 @@ def _spill_book(tmp_path):
     write_xlsx(wb, {"S": {**DATA, **spill("J1", "_xlfn._xlws.SORT(_xlfn.UNIQUE(B2:B5))", [["East"], ["North"], ["West"]]),
                           **spill("K1", "_xlfn._xlws.FILTER(A2:C5,C2:C5>50)", [["Asha", "West", 80.0],
                                                                                  ["Mina", "west", 60.0]]),
-                          "M1": ("=J2&K2", "NorthMina")}})  # a cell reading spilled cells
+                          "O1": ("=J2&K2", "NorthMina")}})  # a cell reading spilled cells (outside K1:M2)
     return wb, load(wb)
 
 

@@ -7,7 +7,7 @@ date formats to FORMATS.
 """
 from __future__ import annotations
 
-from cellproof.expr import BLANK, CELLS, NO_ERR, PLATFORM, Expr, errs, num, num_strict, num_text, txt, where_area
+from cellproof.expr import BLANK, CELLS, NO_ERR, PLATFORM, UNCHECKED, Expr, errs, num, num_strict, num_text, txt, where_area
 from cellproof.functions import arity, register
 from cellproof.model import Unsupported
 from cellproof.parser import Bool, RefNode, Str
@@ -264,3 +264,37 @@ def text(c, args, sheet):
         return x
     x = num(x)
     return Expr(fmt(x.sql), "txt", x.err)
+
+
+@register("CODE")
+def code(c, args, sheet):
+    """The Windows-1252 code of the first character (CHAR's inverse). A character outside Windows-1252 is
+    UNCHECKED; above 127 in a file Excel for Mac calculated, PLATFORM (Mac Roman differs)."""
+    arity("CODE", args, 1, 1)
+    t = _t(c, args[0], sheet)
+    first = f"substr({t.sql}, 1, 1)"
+    u = f"unicode({first})"
+    table = "'" + CP1252.replace("'", "''") + "'"
+    k = f"(CASE WHEN {u} < 128 OR {u} BETWEEN 160 AND 255 THEN {u} WHEN strpos({table}, {first}) > 0 THEN 127 + strpos({table}, {first}) END)"
+    mac = f"(CASE WHEN {k} > 127 THEN '{PLATFORM}' END)" if "Macintosh" in c.book.app else NO_ERR
+    odd = f"(CASE WHEN {t.sql} <> '' AND {k} IS NULL THEN '{UNCHECKED}' END)"
+    return Expr(f"CAST({k} AS DOUBLE)", "num", errs(t.err, _bad(f"{t.sql} = ''"), odd, mac))
+
+
+@register("UNICODE")
+def unicode_(c, args, sheet):
+    arity("UNICODE", args, 1, 1)
+    t = _t(c, args[0], sheet)
+    return Expr(f"CAST(unicode(substr({t.sql}, 1, 1)) AS DOUBLE)", "num", errs(t.err, _bad(f"{t.sql} = ''")))
+
+
+@register("UNICHAR")
+def unichar(c, args, sheet):
+    """chr of the truncated number; 0 or beyond 1114111 is #VALUE!; a surrogate (55296-57343) is UNCHECKED."""
+    arity("UNICHAR", args, 1, 1)
+    n = _n(c, args[0], sheet)
+    k = f"TRY_CAST(trunc({n.sql}) AS BIGINT)"
+    bad = f"COALESCE({k} < 1 OR {k} > 1114111, TRUE)"
+    odd = f"(CASE WHEN {k} BETWEEN 55296 AND 57343 THEN '{UNCHECKED}' END)"
+    return Expr(f"(CASE WHEN NOT ({bad}) AND {k} NOT BETWEEN 55296 AND 57343 THEN chr(CAST({k} AS INTEGER)) END)",
+                "txt", errs(n.err, _bad(bad), odd))

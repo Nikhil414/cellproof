@@ -15,6 +15,29 @@ from cellproof.model import Book, Cell, Key, Verdict, a1
 class SqlFailed(Exception):
     """DuckDB rejected SQL that cellproof generated (a bug: every supported formula must run)."""
 
+    def __init__(self, message: str, keys: list):
+        super().__init__(message)
+        self.keys = keys  # the cells of the batch DuckDB rejected
+
+
+MAX_RECOMPILES = 50
+
+
+def verify_book(book: Book, compile_fn) -> tuple:
+    """(compiled, verdicts, failures): verify; when DuckDB rejects a batch, its cells become UNRESOLVED with the reason
+    and the book is compiled again, so every cell reading them is "depends on unresolved cell" - none can read a
+    missing value. Each round removes a batch."""
+    failures = []
+    for _ in range(MAX_RECOMPILES):
+        compiled = compile_fn(book)
+        try:
+            return compiled, verify(book, compiled), failures
+        except SqlFailed as err:
+            failures.append(str(err))
+            for key in err.keys:
+                book.unread[key] = f"DuckDB could not run the SQL cellproof generated ({str(err).split('(', 1)[-1]}"
+    raise SqlFailed(f"DuckDB rejected SQL in {MAX_RECOMPILES} rounds; giving up", [])
+
 
 def execute(book: Book, compiled: Compiled) -> dict[Key, tuple]:
     """The same row SQL as the dbt project: the seed, then each batch appended in place. Returns formula cells only."""
@@ -27,9 +50,9 @@ def execute(book: Book, compiled: Compiled) -> dict[Key, tuple]:
         try:
             con.execute(f"INSERT INTO cells {batch_rows(batch, 'cells')}")
         except duckdb.Error as err:
-            # ponytail: the run stops; marking just this batch's cells (and their dependents) UNRESOLVED needs a recompile
             raise SqlFailed(f"DuckDB could not run the SQL for {a1(batch[0].key)} and {len(batch) - 1} cells after it "
-                            f"({str(err).splitlines()[0]}). This is a bug in cellproof; please report it.") from err
+                            f"({str(err).splitlines()[0]}). This is a bug in cellproof; please report it.",
+                            [s.key for s in batch]) from err
     wanted = {s.key for s in compiled.steps}
     rows = con.execute("SELECT * FROM cells").fetchall()
     return {(s, r, c): (k, n, t) for s, r, c, k, n, t in rows if (s, r, c) in wanted}

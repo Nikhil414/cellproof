@@ -10,7 +10,7 @@ from cellproof.compute import fill_missing
 from cellproof.emitter import run_dbt, write_project
 from cellproof.reader import UnreadableWorkbook, load
 from cellproof.report import write_report
-from cellproof.verifier import SqlFailed, verify
+from cellproof.verifier import SqlFailed, verify_book
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -31,14 +31,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {err}", file=sys.stderr)
         return 2
     book, computed, why = fill_missing(book, args.workbook)
-    compiled = compile_book(book)
-    if why:
-        compiled.unresolved.update({k: f"{r} ({why})" for k, r in compiled.unresolved.items() if r == NO_VALUE})
+    def compile_fn(b):
+        compiled = compile_book(b)
+        if why:
+            compiled.unresolved.update({k: f"{r} ({why})" for k, r in compiled.unresolved.items() if r == NO_VALUE})
+        return compiled
     try:
-        verdicts = verify(book, compiled)
+        compiled, verdicts, failures = verify_book(book, compile_fn)
     except SqlFailed as err:
         print(f"error: {err}", file=sys.stderr)
         return 3
+    for failure in failures:  # those cells are UNRESOLVED in the report; the run goes on
+        print(f"error: {failure}", file=sys.stderr)
     out = args.out or args.workbook.with_name(args.workbook.stem + "_dbt")
     write_project(book, compiled, out, args.workbook.stem)
     counts = write_report(verdicts, compiled.findings, out, args.workbook.name, computed, compiled.notes,
@@ -46,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     if computed:
         print(f"{len(computed)} expected values computed by the formulas library (the file had none saved)")
     print(f"{counts['PASS']} pass, {counts['FAIL']} fail, {counts['UNRESOLVED']} unresolved -> {out / 'REPORT.md'}")
-    code = 1 if counts["FAIL"] else 0
+    code = 3 if failures else 1 if counts["FAIL"] else 0
     if args.dbt:
         ok, log = run_dbt(out)
         print("dbt build: ok" if ok else f"dbt build failed:\n{log}")

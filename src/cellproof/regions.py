@@ -64,7 +64,8 @@ def _runs(book: Book):
         run, key0 = [], None
         for row in rows + [None]:
             cell = book.cells[(sheet, row, col)] if row is not None else None
-            ok = cell is not None and cell.formula is not None and not cell.array and cell.kind != "blank"
+            ok = (cell is not None and cell.formula is not None and not cell.array and cell.kind != "blank"
+                  and cell.key not in book.unread)  # not read, or DuckDB rejected it once: cell mode says why
             shape = lex[(sheet, row, col)][0] if ok else None
             ok, key = shape is not None, shape.key if shape is not None else None
             if ok and run and row == run[-1] + 1 and key == key0:

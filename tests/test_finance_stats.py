@@ -21,6 +21,8 @@ DATA = {  # STDEV example column, the RANK example, the PERCENTILE/QUARTILE exam
     **{f"E{i}": v for i, v in enumerate([3, 5, 3, 5, 4, 4, 2, 4, 6, 7], 1)},
     "F1": 41235, "F2": 41247, "F3": 41295, "G1": 39778, "G2": 39786, "G3": 39834,
     "H1": -10000, "H2": 3000, "H3": 4200, "H4": 6800, "H5": "note", "H7": "#N/A",
+    **{f"I{i}": v for i, v in enumerate([-70000, 12000, 15000, 18000, 21000, 26000], 1)},
+    "J1": -100.0, "J2": 230.0, "J3": -132.0, "J4": 0.0,
 }
 
 
@@ -133,3 +135,29 @@ def test_workday_over_a_huge_holiday_range_stays_small():
     t = time.time()
     run([("=WORKDAY(39722,151,D!I1:XFD1048576)", 39933), ("=WORKDAY(39722,151,D!G1:G1048576)", 39938)])
     assert time.time() - t < 10
+
+
+def _root(f, lo, hi):
+    from fractions import Fraction  # an exact bisection, independent of the SQL
+    lo, hi = Fraction(lo), Fraction(hi)
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if (f(lo) < 0) == (f(mid) < 0):
+            lo = mid
+        else:
+            hi = mid
+    return float(lo)
+
+
+def test_irr_and_rate_match_microsofts_examples_and_an_exact_root():
+    flows = [-70000, 12000, 15000, 18000, 21000, 26000]
+    npv = lambda vals: (lambda r: sum(v / (1 + r) ** k for k, v in enumerate(vals)))  # noqa: E731
+    run([("=IRR(D!I1:I6)", _root(npv(flows), 0, 1)), ("=IRR(D!I1:I6)", (0.087, 3)),
+         ("=IRR(D!I1:I5)", _root(npv(flows[:5]), -0.5, 0)), ("=IRR(D!I1:I5)", (-0.021, 3)),
+         ("=IRR(D!I1:I3,-0.1)", _root(npv(flows[:3]), -0.9, -0.1)), ("=IRR(D!I1:I3,-0.1)", (-0.444, 3)),
+         ("=IRR(D!I2:I4)", "#NUM!"), ("=IRR(D!J1:J4)", UNCHECKED),         # all positive; two sign changes
+         ("=RATE(4*12,-200,8000)", (0.0077, 4)), ("=RATE(4*12,-200,8000)*12", (0.0924, 4)),
+         ("=RATE(10,-120,1000,0,0)", _root(lambda r: 1000 * (1 + r) ** 10 - 120 * ((1 + r) ** 10 - 1) / r,
+                                           "0.0001", "0.5")),
+         ("=RATE(10,-100,1000)", UNCHECKED),  # payments that only repay: rate 0, where Newton's step divides by 0
+         ("=RATE(0,-100,1000)", UNCHECKED)])

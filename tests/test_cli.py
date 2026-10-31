@@ -1,4 +1,5 @@
 import io
+import json
 import sys
 
 from xlsxkit import SALES, write_xlsx
@@ -90,3 +91,44 @@ def test_sql_that_duckdb_rejects_exits_3_with_the_cell(tmp_path, capsys, monkeyp
     monkeypatch.setattr(verifier, "batch_rows", lambda batch, prev: "SELECT no_such_column")
     assert main(["convert", str(wb), "--out", str(tmp_path / "out")]) == 3
     assert "S!B1" in capsys.readouterr().err
+
+
+def test_sql_duckdb_rejects_makes_its_cells_and_their_readers_unresolved_not_the_run(tmp_path, monkeypatch, capsys):
+    # a bug in generated SQL (like 0.3.1's SUBSTITUTE on DuckDB 2.0) used to stop the whole run with no report
+    import cellproof.compiler as compiler
+    import cellproof.verifier as verifier
+    from xlsxkit import write_xlsx
+    monkeypatch.setattr(compiler, "BATCH", 1)  # one cell per batch: B1's batch fails alone
+    wb = tmp_path / "b.xlsx"
+    write_xlsx(wb, {"S": {"A1": 2.0, "B1": ("=A1*3", 6.0), "C1": ("=B1+1", 7.0), "D1": ("=A1+10", 12.0)}})
+    real = verifier.batch_rows
+
+    def broken(batch, prev):
+        sql = real(batch, prev)
+        return sql.replace("* CAST(3.0 AS DOUBLE)", "* no_such_column")  # only the batch holding B1 breaks
+    monkeypatch.setattr(verifier, "batch_rows", broken)
+    out = tmp_path / "out"
+    assert main(["convert", str(wb), "--out", str(out)]) == 3  # still says: this is a cellproof bug
+    report = json.loads((out / "report.json").read_text(encoding="utf-8"))
+    status = {c["cell"]: (c["status"], c["reason"]) for c in report["cells"]}
+    assert status["S!B1"][0] == "UNRESOLVED" and "DuckDB could not run" in status["S!B1"][1]
+    assert status["S!C1"][0] == "UNRESOLVED" and status["S!D1"] == ("PASS", "")
+    assert "please report" in capsys.readouterr().err
+
+
+def test_a_rejected_region_or_spill_is_not_rebuilt_forever(tmp_path, monkeypatch):
+    import cellproof.verifier as verifier
+    from test_dynamic import DATA, spill
+    from xlsxkit import write_xlsx
+    s = {f"A{r}": float(r) for r in range(1, 30)}
+    s.update({f"B{r}": (f"=A{r}*7", 7.0 * r) for r in range(1, 30)})  # a region
+    s.update(spill("D1", "_xlfn._xlws.SORT(A1:A3)", [[1.0], [2.0], [3.0]]))
+    wb = tmp_path / "b.xlsx"
+    write_xlsx(wb, {"S": s})
+    real = verifier.batch_rows
+    monkeypatch.setattr(verifier, "batch_rows", lambda b, p: real(b, p).replace("CAST(7.0 AS DOUBLE)", "nope")
+                        .replace("ORDER BY", "ORDER BY nope,", 1))
+    out = tmp_path / "out"
+    assert main(["convert", str(wb), "--out", str(out)]) == 3
+    report = json.loads((out / "report.json").read_text(encoding="utf-8"))
+    assert {c["status"] for c in report["cells"]} == {"UNRESOLVED"}

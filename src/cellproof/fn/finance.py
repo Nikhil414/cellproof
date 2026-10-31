@@ -101,3 +101,66 @@ def npv(c, args, sheet):
     sql = (f"(SELECT COALESCE(SUM(num / POWER(1 + {r.sql}, p)), CAST(0 AS DOUBLE)) FROM ({periods}) npv_periods)")
     return Expr(sql, "num", errs(r.err, *(v.err for v in typed), *(g.err(c) for g in ranges),
                                  _unchecked(f"{r.sql} = -1")))
+
+
+NEWTON_STEPS = 100
+
+
+def _newton(ctes: str, f: str, fp: str, guess: str) -> tuple[str, str]:
+    """(root SQL, converged SQL) of Newton's method from guess; f and fp are SQL of the column r (and the CTEs).
+    Excel stops at 0.00001 percent; this runs to the last digits, which differ from Excel's last iterate by far less
+    than the verifier's 1e-9. Not converging, or leaving r > -1, is #NUM!, as in Excel."""
+    it = (f"WITH RECURSIVE {ctes}, it(n, r, d) AS (SELECT 0, CAST({guess} AS DOUBLE), CAST(NULL AS DOUBLE) "
+          f"UNION ALL SELECT n + 1, r - fv / fpv, fv / fpv FROM (SELECT it.n, it.r, {f} AS fv, {fp} AS fpv FROM it, "
+          f"args WHERE it.n < {NEWTON_STEPS} AND it.r > -1 AND (it.d IS NULL OR abs(it.d) > 1e-13 * greatest(1, "
+          f"abs(it.r)))) s) SELECT {{}} FROM it ORDER BY n DESC LIMIT 1")
+    ok = "(d IS NOT NULL AND isfinite(r) AND r > -1 AND abs(d) <= 1e-10 * greatest(1, abs(r)))"
+    return f"({it.format('CASE WHEN ' + ok + ' THEN r END')})", f"({it.format(ok)})"
+
+
+@register("IRR")
+def irr(c, args, sheet):
+    """IRR(values, [guess]): the rate where the NPV of the values (the first one now) is 0. Text, TRUE/FALSE and empty
+    cells are skipped. Several sign changes can have several roots, and which one Excel's iteration lands on was
+    not checked: UNCHECKED."""
+    arity("IRR", args, 1, 2)
+    if not isinstance(args[0], RefNode):
+        raise Unsupported("IRR of values typed into the formula not supported yet")
+    rng = _rng(c, args[0], sheet)
+    guess = num(c.expr(args[1], sheet)) if len(args) == 2 and args[1] is not None else Expr("CAST(0.1 AS DOUBLE)", "num")
+    where = f"FROM {CELLS} WHERE {rng.where()} AND kind = 'n'"
+    ctes = f"args AS (SELECT list(num ORDER BY row_num, col_num) AS v {where})"
+    f = "list_sum(list_transform(v, lambda x, i: x / pow(1 + it.r, i - 1)))"
+    fp = "list_sum(list_transform(v, lambda x, i: -(i - 1) * x / pow(1 + it.r, i)))"
+    root, ok = _newton(ctes, f, fp, guess.sql)
+    signs = f"(SELECT COUNT(*) FILTER (WHERE num > 0) > 0 AND COUNT(*) FILTER (WHERE num < 0) > 0 {where})"
+    flips = (f"(SELECT COUNT(*) FROM (SELECT sign(num) AS s, lag(sign(num)) OVER (ORDER BY row_num, col_num) AS p "
+             f"{where} AND num <> 0) irr_signs WHERE s <> p)")
+    # real Excel (formulas' test.xlsx): an error in an array constant is #VALUE!; in cells, not checked
+    error_in = rng.err(c)
+    if error_in != "NULL":
+        error_in = (f"(CASE WHEN {error_in} IS NOT NULL THEN "
+                    f"'{'#VALUE!' if rng.area.sheet in c.book.arrays else UNCHECKED}' END)")
+    return Expr(root, "num", errs(error_in, guess.err, f"(CASE WHEN NOT {signs} THEN '#NUM!' END)",
+                                  _unchecked(f"{flips} > 1"), f"(CASE WHEN NOT {ok} THEN '#NUM!' END)"))
+
+
+@register("RATE")
+def rate(c, args, sheet):
+    """RATE(nper, pmt, pv, [fv], [type], [guess]): the rate solving PMT's equation, by Newton's method."""
+    arity("RATE", args, 3, 6)
+    a = _args(c, args[:5], sheet, "RATE", 3, 5)
+    n, pmt, pv, fv, t = (x.sql for x in a)
+    guess = num(c.expr(args[5], sheet)) if len(args) == 6 and args[5] is not None else Expr("CAST(0.1 AS DOUBLE)", "num")
+    ctes = f"args AS (SELECT {n} AS n_, {pmt} AS pmt, {pv} AS pv, {fv} AS fv, {t} AS t)"
+    g, gp = "pow(1 + it.r, n_)", "(n_ * pow(1 + it.r, n_ - 1))"
+    f = f"(pv * {g} + pmt * (1 + it.r * t) * ({g} - 1) / it.r + fv)"
+    fp = (f"(pv * {gp} + pmt * (t * ({g} - 1) / it.r + (1 + it.r * t) * ({gp} * it.r - ({g} - 1)) / "
+          f"(it.r * it.r)))")
+    root, ok = _newton(ctes, f, fp, guess.sql)
+    return Expr(root, "num", errs(*(x.err for x in a), guess.err, _type(a[4]),
+                                  # a rate of 0 solves it (the payments only repay): Excel's answer there unchecked
+                                  _unchecked(f"{n} <= 0 OR {n} <> floor({n}) OR abs({pv} + {pmt} * {n} + {fv}) "
+                                             f"<= 1e-9 * greatest(abs({pv}), abs({pmt} * {n}), abs({fv}), 1) "
+                                             f"OR abs({root}) < 1e-9"),
+                                  f"(CASE WHEN NOT {ok} THEN '#NUM!' END)"))
