@@ -28,3 +28,19 @@ def test_math_functions_and_their_errors():
             assert (kind, t) == ("e", want), formula
         else:
             assert kind == "n" and math.isclose(n, want, rel_tol=1e-12), (formula, n)
+
+
+def test_round_rounds_the_15_digit_value_excel_sees():
+    # Microsoft's ROUND examples, and ROUND(1.005, 2): Excel 1.01 (the double is 1.00499999..., which binary rounding
+    # took to 1.0 before 0.6.1); the digits may come from a cell
+    cases = [("=ROUND(2.15,1)", 2.2), ("=ROUND(2.149,1)", 2.1), ("=ROUND(-1.475,2)", -1.48), ("=ROUND(21.5,-1)", 20),
+             ("=ROUND(626.3,-3)", 1000), ("=ROUND(1.98,-1)", 0), ("=ROUND(-50.55,-2)", -100), ("=ROUND(1.005,2)", 1.01),
+             ("=ROUND(2.675,2)", 2.68), ("=ROUND(2.5,0)", 3), ("=ROUND(-2.5,0)", -3), ("=ROUND(1E+300,10)", 1e300),
+             ("=ROUND(5,-400)", 0), ("=ROUND(1.005,B1)", 1.01), ("=ROUND(0.1+0.2,15)", 0.3)]
+    book = book_of({"S": {"B1": 2.0, **{f"A{i}": (f, v) for i, (f, v) in enumerate(cases, 1)}}})
+    compiled = compile_book(book)
+    got = execute(book, compiled)
+    assert compiled.unresolved == {}
+    for i, (formula, want) in enumerate(cases, 1):
+        kind, n, _ = got[("S", i, 1)]
+        assert kind == "n" and math.isclose(n, want, rel_tol=1e-12, abs_tol=1e-300), (formula, n)

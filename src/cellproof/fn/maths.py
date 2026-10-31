@@ -94,6 +94,19 @@ def _digits(name: str, rnd: str):
     register(name)(fn)
 
 
+@register("ROUND")
+def round_(c, args, sheet):
+    """Excel rounds the value it shows, 15 significant digits, half away from zero: ROUND(1.005, 2) is 1.01 although
+    the double is 1.00499999... (binary rounding gave 1.0 before 0.6.1). Scaled, snapped to 15 digits, rounded."""
+    x, d = _two(c, args, sheet, "ROUND")
+    p = f"power(10, trunc({d.sql}))"
+    scaled = f"abs({x.sql}) * {p}"
+    # a number too big to scale already has no digits there; 10^-400 underflows to 0, and so does the rounded number
+    sql = (f"(CASE WHEN {d.sql} > 308 OR NOT isfinite({scaled}) THEN {x.sql} WHEN {p} = 0 THEN CAST(0 AS DOUBLE) "
+           f"ELSE sign({x.sql}) * round({xl15(scaled)}) / {p} END)")
+    return Expr(sql, "num", errs(x.err, d.err))
+
+
 _digits("ROUNDUP", "ceil")
 _digits("ROUNDDOWN", "floor")
 _digits("TRUNC", "floor")

@@ -71,14 +71,6 @@ def if_(c, args, sheet):
     return pick(cond.sql, yes, no, errs(cond.err, taken))
 
 
-@register("ROUND")
-def round_(c, args, sheet):
-    arity("ROUND", args, 2, 2)
-    x, digits = num(c.expr(args[0], sheet)), num(c.expr(args[1], sheet))
-    # DuckDB ROUND on DOUBLE rounds half away from zero like Excel (2.675 -> 2.68, verified on 1.5.6)
-    return Expr(f"ROUND({x.sql}, CAST(TRUNC({digits.sql}) AS INTEGER))", "num", errs(x.err, digits.err))
-
-
 def logical_args(c, name: str, args, sheet: str) -> tuple[list[str], str]:
     """AND/OR/XOR arguments: (TRUE/FALSE SQL per argument, NULL when it is skipped; their error).
 
