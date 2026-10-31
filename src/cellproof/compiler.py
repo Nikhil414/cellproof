@@ -19,6 +19,7 @@ from openpyxl.utils import range_boundaries
 
 from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, any_of, compare, error, errs, finalize, lit_num, lit_str, num,
                           txt, where_cell)
+from cellproof.fn.dynamic import DYNAMIC, element
 from cellproof.functions import FUNCS
 from cellproof.graph import formula_order
 from cellproof.model import Book, Cell, Key, Unsupported, a1
@@ -137,7 +138,11 @@ class Compiler:
             c1, r1, _, _ = range_boundaries(cell.ref or a1(cell.key).split("!")[-1])
             self.spill = (cell.row - r1, cell.col - c1)
         try:
-            e = finalize(self.expr(parse(cell.formula), cell.sheet))
+            tree = parse(cell.formula)
+            if self.spill is not None and isinstance(tree, Call) and tree.name in DYNAMIC:
+                c1, r1, c2, r2 = range_boundaries(cell.ref or a1(cell.key).split("!")[-1])
+                return element(self, tree, cell.sheet, *self.spill, (r2 - r1 + 1, c2 - c1 + 1), cell.dynamic)
+            e = finalize(self.expr(tree, cell.sheet))
             if self.spill is not None and self.spill_dims:
                 # real Excel (formulas' test.xlsx): the array is as big as its biggest range, one row (column)
                 # repeating; a block cell beyond it is #N/A whatever the formula does with errors -

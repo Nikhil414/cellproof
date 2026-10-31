@@ -77,13 +77,13 @@ reader -> regions -> dependency graph -> compiler -> verifier -> dbt emitter -> 
    code.
 6. **Emit** the dbt project and the report.
 
-121 Excel functions are supported: ABS, AND, AVERAGE, AVERAGEIF(S), CEILING, CHAR, CHOOSE, CLEAN, CONCAT(ENATE),
-COUNT, COUNTA, COUNTBLANK, COUNTIF(S), DATE, DATEDIF, DAY, DAYS, DAYS360, EDATE, EOMONTH, EXACT, EXP, FIND, FLOOR, FV,
+125 Excel functions are supported: ABS, AND, AVERAGE, AVERAGEIF(S), CEILING, CHAR, CHOOSE, CLEAN, CONCAT(ENATE),
+COUNT, COUNTA, COUNTBLANK, COUNTIF(S), DATE, DATEDIF, DAY, DAYS, DAYS360, EDATE, EOMONTH, EXACT, EXP, FILTER, FIND, FLOOR, FV,
 HLOOKUP, IF, IFERROR, IFNA, IFS, INDEX, INT, IS* (BLANK, ERR, ERROR, LOGICAL, NA, NUMBER, TEXT), LARGE, LEFT, LEN, LET,
 LN, LOG, LOG10, LOOKUP, LOWER, MATCH, MAX, MAXIFS, MEDIAN, MID, MIN, MINIFS, MOD, MODE, MONTH, MROUND, NA, NETWORKDAYS,
 NOT, NPER, NPV, OR, PERCENTILE(.INC), PI, PMT, POWER, PRODUCT, PROPER, PV, QUARTILE(.INC), RANK(.EQ), REPLACE, REPT,
 RIGHT, ROUND(UP/DOWN), SEARCH, SIGN, SMALL, SQRT, STDEV(.S/.P/P), SUBSTITUTE, SUBTOTAL, SUM, SUMIF(S), SUMPRODUCT,
-SWITCH, TEXT, TEXTJOIN, TRIM, TRUE/FALSE, TRUNC, UPPER, VALUE, VAR(.S/.P/P), VLOOKUP, WEEKDAY, WORKDAY, XLOOKUP, XOR,
+SORT, SWITCH, TEXT, TEXTJOIN, TRIM, TRUE/FALSE, TRUNC, UNIQUE, UPPER, VALUE, VAR(.S/.P/P), VLOOKUP, WEEKDAY, WORKDAY, XLOOKUP, XOR,
 YEAR, YEARFRAC.
 
 **Excel tables:** structured references (`Sales[Amount]`, `Sales[@Qty]`, `Sales[[#This Row],[Qty]]`, `Sales[#Totals]`,
@@ -99,23 +99,32 @@ COUNTIFS/SUMIFS with a criterion from the row run at the same speed.
 cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each reported with a reason:
 
 - **File formats:** `.xlsx` and `.xlsm` only (no `.xls`, `.xlsb`, `.ods`). Macros (VBA) are ignored.
-- **Array constants** (`{0,50,100}`) work wherever a range is taken (`SUM`, `MATCH`, `LOOKUP`, `VLOOKUP`, `INDEX`...)
-  and inside array arithmetic; where one value is expected (`A1*{1,2}`) they need array evaluation and are UNRESOLVED.
+- **Array constants** (`{0,50,100}`) work wherever a range is taken (`SUM`, `MATCH`, `LOOKUP`, `VLOOKUP`, `INDEX`...),
+  inside array arithmetic and in array formulas; where one value is expected in a plain formula (`A1*{1,2}`) they are
+  UNRESOLVED.
+- **Array formulas over a block and dynamic arrays** (legacy Ctrl+Shift+Enter blocks, Excel 365 spills): every cell of
+  the block is verified. A range where one value is expected takes the cell's element (one row or column repeats);
+  past the array a cell is #N/A, while an IS function's own range is padded per element, as real Excel does. `A1#`
+  and `@` are read. **FILTER, SORT and UNIQUE** spill their results and nest in each other; a dynamic spill whose
+  result is not exactly as big as the block Excel saved shows #SPILL! in its first cell (a FAIL). The generated SQL
+  computes the block Excel saved: if the data later changes the size of a FILTER's result, re-run cellproof.
+  Not yet: SORTBY, SEQUENCE, XMATCH, TAKE/DROP/CHOOSECOLS and the other array functions, FILTER/SORT/UNIQUE inside
+  another calculation (`ROWS(UNIQUE(...))`), SORT by several keys or by columns, SORT keys that are empty, errors or
+  text with punctuation (Excel's own text order), UNIQUE over empty cells or errors - all UNRESOLVED.
 - **Array arithmetic in aggregates** (`SUM(A1:A10*B1:B10)`, `SUMPRODUCT((A1:A9>5)*C1:C9)`, `MAX(IF(A1:A9="x",B1:B9))`,
   `SUM(IFERROR(A1:A9/B1:B9,0))`, `COUNTA(A1:A9&B1:B9)`, `SUM(A1:A9^2)`) follows modern Excel: element by element, an
   empty element is 0, text converts when it is a number ("3" -> 3) and is #VALUE! otherwise, comparisons rank
   numbers < text < TRUE/FALSE case-insensitively, concatenation writes numbers the Excel way, and the first error
-  wins. A single-cell array formula (Ctrl+Shift+Enter) compiles; an array formula over several cells is UNRESOLVED
-  (spilling is not read yet). A plain-entered range arithmetic or IF as an aggregate argument follows modern Excel,
+  wins. A plain-entered range arithmetic or IF as an aggregate argument follows modern Excel,
   not the legacy first-row intersection - a workbook an old Excel last saved can show FAILs there, with both values
   shown.
-- **Not supported:** multi-cell array formulas and dynamic arrays, volatile functions (`NOW`, `TODAY`, `RAND`, `OFFSET`, and
+- **Not supported:** volatile functions (`NOW`, `TODAY`, `RAND`, `OFFSET`, and
   `INDIRECT` of text built while the sheet runs; `INDIRECT("Sales")` is fine), functions outside the list above,
   external workbooks, a structured reference naming several separate columns (`T[[A],[C]]`), INDEX used as a reference, the 1904 date system in
   TEXT date formats.
 - **Ranges where one value is expected** (`=IF(E$3:E$41="F",B$3:B$41)`) take the formula's own row or column, as
   Excel does (implicit intersection). As an aggregate's argument the element-wise answer is compiled instead (see
-  array arithmetic above). IFERROR, IFS and CHOOSE over arrays are still UNRESOLVED.
+  array arithmetic above); in an array formula, element by element (see array formulas above).
 - **Approximate lookups on unsorted data** (LOOKUP, MATCH/VLOOKUP/HLOOKUP with match type 1): compiled for plain
   numeric tables written as inputs (up to about 1,000 values): the SQL carries Excel's binary-search path itself, and
   refuses changed table values instead of answering from a stale search. MATCH with type -1, text tables, tables with

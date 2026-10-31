@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import html
 from bisect import bisect_left, bisect_right
 import datetime
 import re
@@ -17,7 +18,8 @@ from openpyxl.worksheet.formula import ArrayFormula
 from cellproof.model import Book, Cell, Kind, Unsupported, Value, a1
 from cellproof.tables import Table, expand
 
-ERRORS = {"#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A"}
+ERRORS = {"#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A",
+          "#CALC!", "#SPILL!", "#FIELD!", "#BUSY!", "#CONNECT!", "#BLOCKED!", "#UNKNOWN!"}  # the last ones: Excel 365
 SUPPORTED = {".xlsx", ".xlsm"}
 # An .xlsx is a zip of XML. A small file that unzips to gigabytes (a "zip bomb") would exhaust memory in openpyxl.
 # ponytail: one total-size limit; raise it if real workbooks ever need more
@@ -152,10 +154,46 @@ def load(path: str | Path) -> Book:
                 tuple(col.name for col in t.tableColumns))
     book = Book(cells, [ws.title for ws in fwb.worksheets], names, max_row, fwb.epoch == CALENDAR_MAC_1904, app,
                 tables=tables)
+    _mark_dynamic(path, book)
     spread_blocks(book)
     rewrite_anchors(book)
     rewrite_tables(book)
     return book
+
+
+CELL_TAG = re.compile(rb"<c\s[^>]*>")
+ATTR = re.compile(rb'\s(r|cm)="([^"]*)"')
+
+
+def _mark_dynamic(path: Path, book: Book) -> None:
+    """Excel marks a dynamic array's anchor cell with cm="..." (cell metadata), which openpyxl does not keep."""
+    anchors = {k for k, c in book.cells.items() if c.array}
+    if not anchors:
+        return
+    sheets = {k[0] for k in anchors}
+    with zipfile.ZipFile(path) as z:
+        wb = z.read("xl/workbook.xml").decode("utf-8", "replace")
+        rels = z.read("xl/_rels/workbook.xml.rels").decode("utf-8", "replace")
+        target = {m.group(1): m.group(2) for m in re.finditer(r'<Relationship\b[^>]*?Id="([^"]+)"[^>]*?Target="([^"]+)"', rels)}
+        target.update({m.group(2): m.group(1) for m in re.finditer(r'<Relationship\b[^>]*?Target="([^"]+)"[^>]*?Id="([^"]+)"', rels)})
+        for m in re.finditer(r'<sheet\b([^>]*)/?>', wb):
+            name = re.search(r'\bname="([^"]*)"', m.group(1))
+            rid = re.search(r'\br:id="([^"]*)"', m.group(1))
+            if not (name and rid) or html.unescape(name.group(1)) not in sheets or rid.group(1) not in target:
+                continue
+            sheet, part = html.unescape(name.group(1)), target[rid.group(1)].lstrip("/")
+            part = part if part.startswith("xl/") else "xl/" + part
+            try:
+                xml = z.read(part)
+            except KeyError:
+                continue
+            for tag in CELL_TAG.finditer(xml):
+                attrs = dict(ATTR.findall(tag.group(0)))
+                if b"cm" in attrs and b"r" in attrs:
+                    r, c = openpyxl.utils.cell.coordinate_to_tuple(attrs[b"r"].decode())
+                    cell = book.cells.get((sheet, r, c))
+                    if cell is not None and cell.array:
+                        book.cells[cell.key] = dataclasses.replace(cell, dynamic=True)
 
 
 def spread_blocks(book: Book) -> None:
@@ -187,7 +225,7 @@ def spread_blocks(book: Book) -> None:
             continue
         for k in inside:
             old = book.cells[k]
-            book.cells[k] = Cell(cell.sheet, k[1], k[2], cell.formula, old.value, old.kind, True, cell.ref)
+            book.cells[k] = Cell(cell.sheet, k[1], k[2], cell.formula, old.value, old.kind, True, cell.ref, cell.dynamic)
 
 
 ANCHOR = re.compile(r"_xlfn\.ANCHORARRAY\(\s*((?:'(?:[^']|'')+'|[A-Za-z0-9_.]+)!)?\$?([A-Za-z]{1,3})\$?([0-9]+)\s*\)")

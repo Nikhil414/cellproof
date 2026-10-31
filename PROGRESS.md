@@ -24,6 +24,8 @@ Everything below is on `main`, built test-first, each piece reviewed by a fresh 
 | 0.3.0 functions | PMT, PV, FV, NPER, NPV; LARGE, SMALL, RANK(.EQ), STDEV/VAR (S/P), PERCENTILE(.INC), QUARTILE(.INC); NETWORKDAYS, WORKDAY. Edge cases not checked in real Excel are an UNCHECKED marker (UNRESOLVED), like LOCALE |
 | Excel tables | structured references rewritten to A1 text by the reader (`tables.py`); [#This Row] becomes a same-row reference, so a calculated column is a region |
 | LET | names (stored `_xlpm.x`) substituted by their value's tree, shadowing respected; the graph skips them as dependencies |
+| Array blocks (0.4.0) | each cell of a CSE block or dynamic spill is a formula cell computing its element (`Compiler.spill`, `_element`); per-cell #N/A past the array, IS functions padded per element; ANCHORARRAY, SINGLE; blocks never overwrite other formulas |
+| FILTER/SORT/UNIQUE (0.4.0) | `fn/dynamic.py`: arrays as relations (i, j, value), nested via MATERIALIZED CTEs; dynamic anchors check the result size against the saved block (`Cell.dynamic` from the file's cm mark) |
 | Open source | MIT license, README with limits, SECURITY.md, CI on Windows/macOS/Linux x Python 3.10-3.13 |
 
 Tests: 492 (+10 skipped without dbt/Excel files), plus 3 workbooks saved by real Excel that all PASS (4 cells UNRESOLVED on
@@ -94,9 +96,8 @@ What Excel taught us (each has a test in `tests/test_excel_findings.py`):
 
 ## Next
 
-1. Array evaluation, next slices: IFS/CHOOSE over arrays, then legacy multi-cell array formulas and dynamic
-   arrays. (Done: element-wise arithmetic, comparisons, IF, IFERROR/IFNA, & and ^ inside the aggregates - see
-   Arrays slices 1-3 above.)
+1. Arrays, next: FILTER/SORT/UNIQUE inside other calculations (`ROWS(UNIQUE())`, `SUM(FILTER())`), SORTBY,
+   SEQUENCE, XMATCH (384 corpus cells), TAKE/DROP/CHOOSECOLS/TOCOL; one evaluation per spill instead of per cell.
 2. Test on more real analyst workbooks (one user workbook found 4 gaps the 85 public files did not).
 3. Read time (openpyxl loads the workbook twice) and the per-cell dependency loop.
 4. Plan 3: AI retry loop for failed cells (it sees formula structure only, never values).

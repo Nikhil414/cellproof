@@ -183,7 +183,7 @@ class _Parser:
             self.take()
             return inner
         if tok.type == Token.FUNC and tok.subtype == Token.OPEN:
-            return self.call(tok.value[:-1].upper().removeprefix("_XLFN."))
+            return self.call(tok.value[:-1].upper().removeprefix("_XLFN.").removeprefix("_XLWS."))  # FILTER, SORT: _xlfn._xlws.
         if tok.type == Token.ARRAY and tok.subtype == Token.OPEN:
             return self.array()
         raise Unsupported(f"unexpected {tok.value!r} in formula")

@@ -39,6 +39,7 @@ class Cell:
     kind: Kind  # kind of the saved value
     array: bool = False  # array (Ctrl+Shift+Enter) formula
     ref: str | None = None  # the array formula's ref ("A1" one cell, "A1:A3" a block), None when not an array
+    dynamic: bool = False  # a dynamic array (Excel 365 spill): the block is exactly as big as Excel's result
 
     @property
     def key(self) -> Key:

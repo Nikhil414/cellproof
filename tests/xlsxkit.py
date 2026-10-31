@@ -29,16 +29,18 @@ def _kind(v):
 def _cell_xml(ref, spec):
     if isinstance(spec, tuple):
         formula, saved = spec[0], spec[1]
+        dyn = ""
         if formula.startswith("{="):
             spill = spec[2] if len(spec) > 2 else ref  # a CSE formula's ref: one cell, or the block it fills
             f = f'<f t="array" ref="{spill}">{escape(formula[2:-1])}</f>'
+            dyn = ' cm="1"' if len(spec) > 3 and spec[3] == "dynamic" else ""  # Excel 365's dynamic-array mark
         else:
             f = f"<f>{escape(formula[1:])}</f>"
         if saved is None:
-            return f'<c r="{ref}">{f}</c>'
+            return f'<c r="{ref}"{dyn}>{f}</c>'
         kind, text = _kind(saved)
         t = {"n": "", "b": ' t="b"', "e": ' t="e"', "s": ' t="str"'}[kind]
-        return f'<c r="{ref}"{t}>{f}<v>{escape(text)}</v></c>'
+        return f'<c r="{ref}"{t}{dyn}>{f}<v>{escape(text)}</v></c>'
     kind, text = _kind(spec)
     if kind == "s":
         return f'<c r="{ref}" t="inlineStr"><is><t>{escape(text)}</t></is></c>'
