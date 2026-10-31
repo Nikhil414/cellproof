@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1 (2026-10-31)
+
+- **ROUND rounds the value Excel shows** (15 significant digits, half away from zero): `ROUND(1.005, 2)` is 1.01,
+  as in Excel. The double 1.005 is 1.00499999..., and the binary rounding before gave 1.0 - an honest FAIL, never a
+  false PASS. Same method as ROUNDUP/ROUNDDOWN; Microsoft's ROUND examples are tests.
+
 ## 0.6.0 (2026-10-31)
 
 - **A batch DuckDB rejects no longer stops the run:** its cells are UNRESOLVED with DuckDB's message, the book is
