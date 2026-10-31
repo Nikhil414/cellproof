@@ -270,10 +270,11 @@ def workday(c, args, sheet):
     s = _serial(c, args[0], sheet)
     d = num(c.expr(args[1], sheet))
     rng, odd = _holidays(c, args, sheet, "WORKDAY", 2)
-    extra = 0 if rng is None else 2 * (rng.area.r2 - rng.area.r1 + 1) * (rng.area.c2 - rng.area.c1 + 1)
+    # the holidays actually there, not the range's area (H:XFD would be 3E10 days); never past Excel's last date
+    extra = "0" if rng is None else f"2 * (SELECT COUNT(*) FROM ({_holiday_serials(rng)}) hol)"
     n = f"CAST(abs(trunc({d.sql})) AS BIGINT)"
     step = f"(CASE WHEN {d.sql} < 0 THEN -1 ELSE 1 END)"
-    span = f"({n} * 7 // 5 + 7 + {extra})"  # enough calendar days to hold n working days and every holiday
+    span = f"LEAST({n} * 7 // 5 + 7 + {extra}, {MAX_SERIAL + 7})"  # room for n working days and each holiday
     start = f"CAST({s.sql} AS BIGINT)"
     skip = "" if rng is None else f" AND x NOT IN ({_holiday_serials(rng)})"
     days = (f"SELECT x, row_number() OVER (ORDER BY x * {step}) AS rn FROM "

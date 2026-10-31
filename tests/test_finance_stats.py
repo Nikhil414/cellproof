@@ -125,3 +125,11 @@ def test_pasted_down_columns_equal_cell_mode():
     assert regions.unresolved == cells.unresolved
     assert execute(book, regions) == execute(book, cells)
     assert len(cells.unresolved) < 12, cells.unresolved  # only the UNCHECKED-free formulas compile everywhere
+
+
+def test_workday_over_a_huge_holiday_range_stays_small():
+    # the span is sized by the holidays present, not the range's area (I1:XFD1048576 is 1.7E10 empty cells)
+    import time
+    t = time.time()
+    run([("=WORKDAY(39722,151,D!I1:XFD1048576)", 39933), ("=WORKDAY(39722,151,D!G1:G1048576)", 39938)])
+    assert time.time() - t < 10
