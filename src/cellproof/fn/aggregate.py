@@ -286,9 +286,12 @@ def _rng(c, node, sheet: str, skip_subtotals: bool = False) -> Rng:
 def _split(c, args, sheet: str, fname: str, skip_subtotals: bool = False) -> tuple[list, list, list]:
     """The arguments as (ranges, arrays, values). A range arithmetic or an IF over ranges is an array; a
     calculation over plain values stays a value, evaluated before the cells are read (MAX(H3, 1/0) is #DIV/0!)."""
+    from cellproof.fn.dynamic import DYNAMIC, as_array
     ranges, arrays, values = [], [], []
     for a in args:
-        if isinstance(a, RefNode):
+        if isinstance(a, Call) and a.name in DYNAMIC:  # SUM(FILTER(...)): the relation, read like an array
+            arrays.append(as_array(c, a, sheet))
+        elif isinstance(a, RefNode):
             ranges.append(_rng(c, a, sheet, skip_subtotals))
         elif isinstance(a, Binary) or (isinstance(a, Unary) and a.op == "-") or (
                 isinstance(a, Call) and a.name in ("IF", "IFERROR", "IFNA")):
@@ -363,6 +366,9 @@ def _plain(name, how):
         result = how(c, ranges, arrays, values)
         if name not in ("COUNT", "COUNTA", "SUM"):  # SUM's error order is already the rule inside _sum
             result = replace(result, err=errs(_errs(c, ranges, arrays, values), result.err))
+        markers = [a.unchecked() for a in arrays if hasattr(a, "unchecked")]  # FILTER/SORT/UNIQUE: never hidden
+        if markers:
+            result = replace(result, err=errs(*markers, result.err))
         return result
     register(name)(fn)
 

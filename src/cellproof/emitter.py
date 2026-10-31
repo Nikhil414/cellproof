@@ -140,6 +140,10 @@ def write_project(book: Book, compiled: Compiled, out: Path, stem: str) -> None:
             (batches_dir / f"{model_name(k)}.sql").write_text(dbt_region_cells(batch) + "\n", encoding="utf-8")
             schema += (f'  - name: {batch.model}\n    description: "Region: rows of one sheet that repeat one formula down their rows, '
                        f'computed in one statement. Wide and readable; its {model_name(k)} twin holds the same values as long rows."\n')
+        elif hasattr(batch, "render_rows"):  # a spill: its one statement, reading earlier cells as all_cells
+            body = _escape(batch.render_rows("all_cells"))
+            body = body.replace("WITH\n", f"WITH\nall_cells AS (\n{_union(sources_for(k))}\n),\n", 1)
+            (batches_dir / f"{model_name(k)}.sql").write_text(body + "\n", encoding="utf-8")
         else:
             (batches_dir / f"{model_name(k)}.sql").write_text(dbt_sql(batch, sources_for(k)) + "\n", encoding="utf-8")
         if k % CHECKPOINT == 0 or k == n:

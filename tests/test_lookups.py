@@ -134,3 +134,22 @@ def test_the_walk_matches_excel_s_bisection_on_random_tables():
             want = bisection(vec, x)
             kind, num, txt = got[("F", i, 1)]
             assert (kind == "e" and txt == "#N/A") if want is None else num == want + 1
+
+
+def test_xmatch_modes():
+    # Microsoft's XMATCH examples: exact, next smaller/larger, wildcard, last to first
+    from cellproof.compiler import compile_book
+    from cellproof.verifier import execute
+    from xlsxkit import book_of
+    s = {"A1": "Apple", "A2": "Grape", "A3": "Pear", "A4": "Banana", "A5": "Cherry", "A6": "Grape",
+         "B1": 10.0, "B2": 20.0, "B3": 30.0, "B4": 40.0,
+         "C1": ('=_xlfn.XMATCH("Grape",A1:A6)', 2.0), "C2": ('=_xlfn.XMATCH("Grape",A1:A6,0,-1)', 6.0),
+         "C3": ('=_xlfn.XMATCH("gra*",A1:A6,2)', 2.0), "C4": ("=_xlfn.XMATCH(25,B1:B4,-1)", 2.0),
+         "C5": ("=_xlfn.XMATCH(25,B1:B4,1)", 3.0), "C6": ('=_xlfn.XMATCH("Kiwi",A1:A6)', "#N/A"),
+         "C7": ("=_xlfn.XMATCH(25,B1:B4,0,2)", 0.0)}
+    book = book_of({"S": s})
+    compiled = compile_book(book)
+    got = execute(book, compiled)
+    assert [got[("S", r, 3)] for r in range(1, 7)] == [("n", 2.0, None), ("n", 6.0, None), ("n", 2.0, None),
+                                                       ("n", 2.0, None), ("n", 3.0, None), ("e", None, "#N/A")]
+    assert "binary search" in compiled.unresolved[("S", 7, 3)]

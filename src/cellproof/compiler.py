@@ -19,7 +19,7 @@ from openpyxl.utils import range_boundaries
 
 from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, any_of, compare, error, errs, finalize, lit_num, lit_str, num,
                           txt, where_cell)
-from cellproof.fn.dynamic import DYNAMIC, element
+from cellproof.fn.dynamic import DYNAMIC, spill_batch
 from cellproof.functions import FUNCS
 from cellproof.graph import formula_order
 from cellproof.model import Book, Cell, Key, Unsupported, a1
@@ -138,11 +138,7 @@ class Compiler:
             c1, r1, _, _ = range_boundaries(cell.ref or a1(cell.key).split("!")[-1])
             self.spill = (cell.row - r1, cell.col - c1)
         try:
-            tree = parse(cell.formula)
-            if self.spill is not None and isinstance(tree, Call) and tree.name in DYNAMIC:
-                c1, r1, c2, r2 = range_boundaries(cell.ref or a1(cell.key).split("!")[-1])
-                return element(self, tree, cell.sheet, *self.spill, (r2 - r1 + 1, c2 - c1 + 1), cell.dynamic)
-            e = finalize(self.expr(tree, cell.sheet))
+            e = finalize(self.expr(parse(cell.formula), cell.sheet))
             if self.spill is not None and self.spill_dims:
                 # real Excel (formulas' test.xlsx): the array is as big as its biggest range, one row (column)
                 # repeating; a block cell beyond it is #N/A whatever the formula does with errors -
@@ -411,10 +407,46 @@ def compile_book(book: Book, regions: bool = True) -> Compiled:
             notes.append(f"{r.sheet} rows {r.r1}-{r.r2}, columns {letters(r.cols)} stay in cell mode: they could not "
                          f"be ordered as one block ({why})")
     used_models: set[str] = set()
+    spilled: set[Key] = set()
+
+    def add_spill(cell) -> bool:
+        """FILTER/SORT/UNIQUE/... spilled into a block: one batch for the whole block (fn/dynamic.spill_batch)."""
+        nonlocal weight
+        if not cell.array:
+            return False
+        try:
+            tree = parse(cell.formula)
+        except Unsupported:
+            return False
+        if not (isinstance(tree, Call) and tree.name in DYNAMIC):
+            return False
+        c1, r1, c2, r2 = range_boundaries(cell.ref or a1(cell.key).split("!")[-1])
+        block = [k for k in ((cell.sheet, r, c) for r in range(r1, r2 + 1) for c in range(c1, c2 + 1))
+                 if k in book.cells and book.cells[k].array and book.cells[k].ref == cell.ref
+                 and book.cells[k].formula == cell.formula]
+        spilled.update(block)
+        _close(comp, batches, current)
+        weight = 0
+        comp.at = (cell.sheet, r1, c1)
+        try:
+            _finish(comp, batches, spill_batch(comp, tree, cell.sheet, block, (r1, c1, r2, c2), cell.dynamic))
+        except Unsupported as err:
+            for k in block:
+                unresolved[k] = str(err)
+                if err.dep is not None:
+                    chains[k] = err.dep
+        except RecursionError:
+            for k in block:
+                unresolved[k] = DEEP
+        finally:
+            comp.at = None
+        return True
 
     def add(key) -> None:
         nonlocal weight
         cell = book.cells[key]
+        if key in spilled or add_spill(cell):
+            return
         if cell.kind == "blank":
             unresolved[key] = NO_VALUE
             return

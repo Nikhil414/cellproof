@@ -241,6 +241,19 @@ class Search:
             cond, key = _near("k", x, ">=")
             self.agg, self.key = "arg_min", f"({key}, {'-' if last else ''}{self.pos})"
         self.src = f"FROM {table} WHERE {where_area(line, 'k')} AND {cond}"
+        # Not guessed (UNCHECKED): next smaller/larger across types or over text with punctuation (real Excel
+        # ranks numbers < text < TRUE/FALSE and orders text by its own collation: formulas' test.xlsx), and an
+        # exact text match with a German sharp s (Excel matched "ss" to it there)
+        kind = {"num": "'n'", "txt": "'s'", "bool": "'b'"}.get(x.type, x.kind)
+        xt = x.txt if x.type == "any" else x.sql if x.type == "txt" else "NULL"
+        cells = f"FROM {CELLS} k WHERE {where_area(line, 'k')}"
+        if mode == "exact":
+            odd = f"(strpos(COALESCE({xt}, ''), 'ß') > 0 OR EXISTS (SELECT 1 {cells} AND strpos(COALESCE(k.txt, ''), 'ß') > 0))"
+        else:
+            safe = "regexp_matches(COALESCE({t}, ''), '^[A-Za-z0-9 ]*$')"
+            odd = (f"(NOT {safe.format(t=xt)} OR EXISTS (SELECT 1 {cells} AND (k.kind <> {kind} OR "
+                   f"(k.kind = 's' AND NOT {safe.format(t='k.txt')}))))")
+        self.unchecked = f"(CASE WHEN {odd} THEN '{UNCHECKED}' END)"
 
     def pick(self, value: str, default: str | None = None) -> str:
         if default is not None:  # arg_min skips a NULL value: the cell would look not found
@@ -363,13 +376,15 @@ def xlookup(c, args, sheet):
            else f"r.col_num = k.col_num + {back.c1 - look.c1} AND r.row_num = {back.r1}")
     search = Search(x, look, mode, wild=match_mode == 2, last=search_mode == -1, back=(lit_str(back.sheet).sql, hit))
     keys = c.ready(back)
-    found = _read(search.pick, _type_of(c, back, keys), errs(x.err, _found_error(search.pick, "#N/A")))
+    found = _read(search.pick, _type_of(c, back, keys),
+                  errs(x.err, search.unchecked, _found_error(search.pick, "#N/A")))
     if len(args) < 4 or args[3] is None:
         return found
     missing = c.expr(args[3], sheet)
     found, missing = unify_all([found, missing])
     hit_sql = search.hit()
     pick_err = f"(CASE WHEN {hit_sql} THEN {found.err} ELSE {missing.err} END)"
+    pick_err = errs(search.unchecked, pick_err)
 
     def case(a: str, b: str) -> str:
         return f"(CASE WHEN {hit_sql} THEN {a} ELSE {b} END)"
@@ -458,3 +473,27 @@ def choose(c, args, sheet):
     err = errs(i.err, bad, case([v.err for v in values]) if any(v.err != NO_ERR for v in values) else NO_ERR)
     return Expr(case([v.sql for v in values]), values[0].type, err, case([v.txt for v in values]),
                 case([v.kind for v in values]))
+
+
+@register("XMATCH")
+def xmatch(c, args, sheet):
+    """XMATCH(lookup, array, [match_mode], [search_mode]): the position XLOOKUP's search finds (exact, next smaller
+    -1, next larger 1, wildcards 2; first to last 1 or last to first -1)."""
+    arity("XMATCH", args, 2, 4)
+    modes = []
+    for i, default in ((2, 0), (3, 1)):
+        node = args[i] if len(args) > i else None
+        mode = default if node is None else int_literal(node)
+        if mode is None:
+            raise Unsupported("XMATCH modes must be numbers written in the formula")
+        modes.append(mode)
+    match_mode, search_mode = modes
+    if match_mode not in (0, -1, 1, 2) or search_mode not in (1, -1):
+        raise Unsupported("XMATCH binary search modes not supported yet")
+    line = _line(c, args[1], sheet, "XMATCH")
+    x = _xlookup_x(c, args, sheet)
+    found = Search(x, line, {0: "exact", 2: "exact", -1: "le", 1: "ge"}[match_mode], wild=match_mode == 2,
+                   last=search_mode == -1)
+    first = line.r1 if line.c1 == line.c2 else line.c1
+    return Expr(found.pick(f"CAST({found.pos} - {first} + 1 AS DOUBLE)"), "num",
+                errs(x.err, found.unchecked, f"(CASE WHEN NOT {found.hit()} THEN '#N/A' END)"))

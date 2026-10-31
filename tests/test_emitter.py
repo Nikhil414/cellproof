@@ -238,3 +238,30 @@ def test_array_constants_reach_the_dbt_models(tmp_path):
     write_project(book, compiled, tmp_path, "arrays")
     got = {(s, r, c): (k, n, t) for s, r, c, k, n, t in _run_models(tmp_path)}
     assert got == execute(book, compiled)
+
+
+def _spill_book(tmp_path):
+    from test_dynamic import DATA, spill
+    from xlsxkit import write_xlsx
+    from cellproof.reader import load
+    wb = tmp_path / "spill.xlsx"
+    write_xlsx(wb, {"S": {**DATA, **spill("J1", "_xlfn._xlws.SORT(_xlfn.UNIQUE(B2:B5))", [["East"], ["North"], ["West"]]),
+                          **spill("K1", "_xlfn._xlws.FILTER(A2:C5,C2:C5>50)", [["Asha", "West", 80.0],
+                                                                                 ["Mina", "west", 60.0]]),
+                          "M1": ("=J2&K2", "NorthMina")}})  # a cell reading spilled cells
+    return wb, load(wb)
+
+
+def test_spill_models_equal_the_verifier(tmp_path):
+    _, book = _spill_book(tmp_path)
+    compiled = compile_book(book)
+    assert compiled.unresolved == {}
+    write_project(book, compiled, tmp_path / "out", "spill")
+    got = {(s, r, c): (k, n, t) for s, r, c, k, n, t in _run_models(tmp_path / "out")}
+    assert got == execute(book, compiled)
+
+
+@pytest.mark.skipif(shutil.which("dbt") is None, reason="needs: pip install -e .[dbt]")
+def test_dbt_build_with_spills(tmp_path):
+    wb, _ = _spill_book(tmp_path)
+    assert main(["convert", str(wb), "--out", str(tmp_path / "out"), "--dbt"]) == 0

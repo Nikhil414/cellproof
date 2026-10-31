@@ -84,9 +84,50 @@ def test_what_excel_was_not_asked_is_not_guessed(tmp_path):
         **spill("K6", "_xlfn._xlws.FILTER(A2:A5,C2:C5>100)", [["#CALC!"]]),
         # empty sort keys, in a block bigger than the one element: UNRESOLVED, not a #SPILL! FAIL
         **spill("L6", "_xlfn._xlws.SORT(G1:G3)", [[0.0], [0.0], [1.0]]),
-        "J8": ("=ROWS(_xlfn.UNIQUE(B2:B5))", 3.0),
         "J9": ("=_xlfn._xlws.FILTER(A2:A5,C2:C5>50)", "Asha"),           # not an array formula
     })
-    assert set(bad) == {("S", 6, 10), ("S", 6, 11), ("S", 6, 12), ("S", 7, 12), ("S", 8, 12), ("S", 8, 10),
-                        ("S", 9, 10)}
+    assert set(bad) == {("S", 6, 10), ("S", 6, 11), ("S", 6, 12), ("S", 7, 12), ("S", 8, 12), ("S", 9, 10)}
     assert all(v[0] == "UNRESOLVED" for v in bad.values())
+
+
+def test_filter_sort_unique_inside_aggregates(tmp_path):
+    _, bad = check(tmp_path, {
+        "J1": ('=SUM(_xlfn._xlws.FILTER(C2:C5,B2:B5="West"))', 140.0),
+        "J2": ("=COUNTA(_xlfn.UNIQUE(B2:B5))", 3.0),
+        "J3": ("=ROWS(_xlfn.UNIQUE(C2:C5))", 3.0), "J4": ("=COLUMNS(A1:C5)", 3.0), "J5": ("=ROWS(A2:C5)", 4.0),
+        "J6": ("=MAX(_xlfn._xlws.SORT(C2:C5))", 80.0),
+        "J7": ('=AVERAGE(_xlfn._xlws.FILTER(C2:C5,C2:C5<70))', 140 / 3),
+        "J8": ('=SUM(_xlfn._xlws.FILTER(C2:C5,C2:C5>100))', "#CALC!"),  # nothing kept, no if_empty
+        "J9": ('=COUNT(_xlfn._xlws.FILTER(G1:G3,G1:G3<5))', 1.0),       # keeps two empty cells: not checked
+    })
+    assert set(bad) == {("S", 8, 10), ("S", 9, 10)} and all(v[0] == "UNRESOLVED" for v in bad.values())
+
+
+def test_sortby_and_sequence(tmp_path):
+    _, bad = check(tmp_path, {
+        **spill("J1", "_xlfn.SORTBY(A2:A5,C2:C5,-1)", [["Asha"], ["Mina"], ["Ravi"], ["Vikram"]]),
+        **spill("K1", "_xlfn.SORTBY(A2:A5,C2:C5,1,A2:A5,-1)", [["Vikram"], ["Ravi"], ["Mina"], ["Asha"]]),
+        **spill("L1", "_xlfn.SORTBY(A2:A5,C2:C3)", [["#VALUE!"]]),                  # by_array of another height
+        **spill("M1", "_xlfn.SEQUENCE(2,3)", [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+        **spill("M4", "_xlfn.SEQUENCE(3,1,10,-5)", [[10.0], [5.0], [0.0]]),
+        **spill("M8", "_xlfn.SEQUENCE(2.9)", [[1.0], [2.0]]),                        # truncated
+        "M11": ("=SUM(_xlfn.SEQUENCE(100))", 5050.0),
+        **spill("Q1", "_xlfn.SEQUENCE(0)", [["#CALC!"]]),                            # not checked
+        **spill("Q2", "_xlfn.SEQUENCE(1E9,1E9)", [["#NUM!"]]),                       # never built
+    })
+    assert set(bad) == {("S", 1, 17), ("S", 2, 17)} and all(v[0] == "UNRESOLVED" for v in bad.values())
+
+
+def test_corpus_findings_for_sortby_filter_and_xmatch(tmp_path):
+    # formulas' test.xlsx (Excel-saved): SORTBY by one-row arrays sorts the columns; FILTER's if_empty range
+    # spills whole; XMATCH next-smaller across types or over punctuation, and a sharp s, are not guessed
+    _, bad = check(tmp_path, {
+        **spill("J1", "_xlfn.SORTBY(C2:C3,{2},1)", [[80.0], [40.0]]),
+        **spill("K1", "_xlfn.SORTBY(E1:G1,{3,1,2},1)", [[0.0, 1.0, 1.0]]),
+        **spill("K3", "_xlfn.SORTBY({1,2,3;4,5,6},{3,2,2},1,{5,1,4},-1)", [[3.0, 2.0, 1.0], [6.0, 5.0, 4.0]]),
+        **spill("K6", '_xlfn._xlws.FILTER(A2:A5,C2:C5>100,B2:B3)', [["West"], ["East"]]),
+        "N1": ('=_xlfn.XMATCH("*b?u*",{-1.1,2.1,3.1,4.1},-1)', 4.0),
+        "N2": ('=_xlfn.XMATCH("Mina",A2:A5,-1)', 3.0),             # same type, plain text: compiled
+        "N3": ('=_xlfn.XMATCH("ss",{1,"ß"},0)', 2.0),
+    })
+    assert set(bad) == {("S", 1, 14), ("S", 3, 14)} and all(v[0] == "UNRESOLVED" for v in bad.values())

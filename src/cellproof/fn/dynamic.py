@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cellproof.expr import CELLS, SETTINGS, UNCHECKED, Expr, as_any, lit_str
+from cellproof.expr import CELLS, SETTINGS, UNCHECKED, Expr, as_any, lit_str, num
 from cellproof.fn.aggregate import _array, _base, _truth
 from cellproof.fn.lookup import int_literal
 from cellproof.functions import register
@@ -21,7 +21,8 @@ from cellproof.model import Unsupported
 from cellproof.parser import Bool, Call, RefNode
 from cellproof.refs import MAX_ROW, resolve
 
-DYNAMIC = {"FILTER", "SORT", "UNIQUE"}
+DYNAMIC = {"FILTER", "SORT", "SORTBY", "UNIQUE", "SEQUENCE"}
+MAX_ELEMENTS = 1_000_000  # SEQUENCE bigger than this is UNCHECKED and builds nothing (a crafted file's 1E9 x 1E9)
 
 
 @dataclass(frozen=True)
@@ -110,7 +111,9 @@ def filter_(c, args, sheet: str) -> Rel:
             f"{'dense_rank() OVER (ORDER BY a.j)' if other == 'j' else 'a.j'} AS j, a.kind, a.num, a.txt, a.err "
             f"FROM {u}_a a JOIN {u}_f f ON f.k = a.{other} WHERE f.keep)")
     empty = None
-    if len(args) == 3 and args[2] is not None:
+    if len(args) == 3 and isinstance(args[2], RefNode) and not resolve(args[2].text, sheet, c.book).is_single:
+        empty = f"SELECT * FROM {_range(c, args[2], sheet).sql} ie"  # a range spills whole (formulas' test.xlsx)
+    elif len(args) == 3 and args[2] is not None:
         e = as_any(c.expr(args[2], sheet))
         empty = f"SELECT 1, 1, {e.kind}, {e.sql}, {e.txt}, {e.err}"
     else:  # real Excel disagrees with itself: #CALC! in Microsoft's docs, #VALUE! in formulas' test.xlsx
@@ -170,31 +173,172 @@ def unique_(c, args, sheet: str) -> Rel:
     return Rel(_whole(u, ctes, sql, odd, empty), None, a.cols)
 
 
-BUILDERS = {"FILTER": filter_, "SORT": sort_, "UNIQUE": unique_}
+def _keys_safe(table: str) -> str:
+    return (f"(SELECT CASE WHEN EXISTS (SELECT 1 FROM {table} WHERE kind IS NULL OR kind = 'e' OR "
+            f"(kind = 's' AND NOT regexp_matches(COALESCE(txt, ''), {SAFE_TEXT}))) THEN '{UNCHECKED}' END)")
 
 
-def element(c, node, sheet: str, i: int, j: int, block: tuple[int, int], dynamic: bool) -> Expr:
-    """This cell's element (i, j) of the array, 0-based. A result one row (column) high repeats down (across), as in
-    a legacy block; past the result a cell is #N/A. The anchor of a dynamic spill is #SPILL! when the result is not
-    exactly as big as the block Excel spilled it into (the translation disagrees with Excel's own result)."""
-    rel = relation(c, node, sheet).sql
+RANK = "CASE kind WHEN 'n' THEN 0 WHEN 's' THEN 1 ELSE 2 END"
+
+
+def sortby(c, args, sheet: str) -> Rel:
+    """SORTBY(array, by1, [order1], by2, [order2], ...): rows ordered by one-column ranges as high as the array, or
+    columns by one-row ranges as wide (real Excel, formulas' test.xlsx); the first key first, equal keys keep their
+    order. Keys follow SORT's rules (and what is not checked)."""
+    if len(args) < 2:
+        raise Unsupported("SORTBY needs an array and a by_array")
+    a = relation(c, args[0], sheet)
+    pairs, rest = [], list(args[1:])
+    while rest:
+        by = rest.pop(0)
+        order = 1 if not rest or rest[0] is None else int_literal(rest[0])
+        if rest:
+            rest.pop(0)
+        if order is None:
+            raise Unsupported("SORTBY with a sort order that is not one whole number not supported yet")
+        if not isinstance(by, RefNode):
+            raise Unsupported("SORTBY by something other than a range not supported yet")
+        pairs.append((_range(c, by, sheet), order))
+    if a.rows is None or a.cols is None:
+        raise Unsupported("SORTBY of an array whose size is only known at run time not supported yet")
+    if all(by.cols == 1 and by.rows == a.rows for by, _ in pairs):
+        axis, across = "i", "j"
+    elif all(by.rows == 1 and by.cols == a.cols for by, _ in pairs):
+        axis, across = "j", "i"
+    else:
+        return Rel("(SELECT 1 AS i, 1 AS j, 'e' AS kind, NULL AS num, NULL AS txt, '#VALUE!' AS err)", 1, 1)
     u = _uid(c)
-    # ponytail: the relation runs once per value column (4x); one struct per cell if big spills get slow
-    head = (f"WITH {u}_r AS MATERIALIZED {rel}, {u}_d AS (SELECT max(i) AS h, max(j) AS w FROM {u}_r), "
-            f"{u}_e AS (SELECT r.* FROM {u}_r r, {u}_d d WHERE r.i = (CASE WHEN d.h = 1 THEN 1 ELSE {i + 1} END) "
-            f"AND r.j = (CASE WHEN d.w = 1 THEN 1 ELSE {j + 1} END))")
+    bad = [f"CASE WHEN {order} NOT IN (1, -1) THEN '#VALUE!' END" for _, order in pairs]
+    ctes = [f"{u}_a AS MATERIALIZED {a.sql}"]
+    order_by, joins = [], []
+    for n, (by, order) in enumerate(pairs):
+        ctes.append(f"{u}_k{n} AS MATERIALIZED (SELECT {axis} AS p, kind, num, txt FROM {by.sql} b WHERE {across} = 1)")
+        bad.append(_keys_safe(f"{u}_k{n}"))
+        d = "ASC" if order == 1 else "DESC"
+        k = f"k{n}"
+        joins.append(f"JOIN {u}_k{n} {k} ON {k}.p = a.p")
+        order_by += [f"(CASE {k}.kind WHEN 'n' THEN 0 WHEN 's' THEN 1 ELSE 2 END) {d}", f"{k}.num {d}",
+                     f"lower(COALESCE({k}.txt, '')) {d}"]
+    new = (f"(SELECT a.p AS op, row_number() OVER (ORDER BY {', '.join(order_by)}, a.p) AS np "
+           f"FROM (SELECT DISTINCT {axis} AS p FROM {u}_a) a {' '.join(joins)})")
+    i_sql, j_sql = ("n.np", "a.j") if axis == "i" else ("a.i", "n.np")
+    sql = (f"(SELECT {i_sql} AS i, {j_sql} AS j, a.kind, a.num, a.txt, a.err FROM {u}_a a "
+           f"JOIN {new} n ON n.op = a.{axis})")
+    first_bad = "COALESCE(" + ", ".join(f"({b})" for b in bad) + ")"
+    return Rel(_whole(u, ctes, sql, first_bad), a.rows, a.cols)
 
-    def get(col: str) -> str:
-        return f"({head} SELECT {col} FROM {u}_e)"
-    kind = f"COALESCE(NULLIF({get('kind')}, 'e'), 'n')"  # an empty element spills as 0
-    num = f"COALESCE({get('num')}, CAST(0 AS DOUBLE))"
-    txt = f"COALESCE({get('txt')}, '')"
-    size = f"(SELECT h <> {block[0]} OR w <> {block[1]} FROM {u}_d)" if dynamic and (i, j) == (0, 0) else "FALSE"
+
+def sequence(c, args, sheet: str) -> Rel:
+    """SEQUENCE(rows, [columns], [start], [step]): start, start + step, ... row by row; rows and columns are
+    truncated. Fewer than one row or column, or more than MAX_ELEMENTS elements, is UNCHECKED."""
+    if not 1 <= len(args) <= 4:
+        raise Unsupported("SEQUENCE needs one to four arguments")
+    one = Expr("CAST(1 AS DOUBLE)", "num")
+    rows, cols, start, step = (num(c.expr(a, sheet)) if a is not None else one
+                               for a in list(args) + [None] * (4 - len(args)))
+    h, w = f"trunc({rows.sql})", f"trunc({cols.sql})"
+    ok = f"({h} >= 1 AND {w} >= 1 AND {h} * {w} <= {MAX_ELEMENTS})"
+    n = lambda x: f"(CASE WHEN {ok} THEN CAST({x} AS BIGINT) ELSE 0 END)"  # noqa: E731 - builds nothing when not ok
+    body = (f"(SELECT gi.i AS i, gj.j AS j, 'n' AS kind, {start.sql} + (({'gi.i'} - 1) * {w} + gj.j - 1) * "
+            f"{step.sql} AS num, CAST(NULL AS VARCHAR) AS txt, CAST(NULL AS VARCHAR) AS err "
+            f"FROM range(1, {n(h)} + 1) gi(i) CROSS JOIN range(1, {n(w)} + 1) gj(j))")
+    u = _uid(c)
+    bad = (f"COALESCE({rows.err}, {cols.err}, {start.err}, {step.err}, "
+           f"CASE WHEN NOT {ok} THEN '{UNCHECKED}' END)")
+    return Rel(_whole(u, [], body, bad), None, None)
+
+
+BUILDERS = {"FILTER": filter_, "SORT": sort_, "SORTBY": sortby, "UNIQUE": unique_, "SEQUENCE": sequence}
+
+
+class SpillBatch(list):
+    """The Step of every cell of a spilled block, and one set-based statement computing them all: the relation once,
+    each cell joined to its element (like region.RegionBatch)."""
+
+    def __init__(self, steps, sql: str):
+        super().__init__(steps)
+        self.sql = sql
+
+    def render_rows(self, prev: str) -> str:
+        return self.sql.replace(CELLS, prev)
+
+
+def spill_batch(c, node, sheet: str, block: list, box: tuple, dynamic: bool) -> SpillBatch:
+    """A result one row (column) high repeats down (across), as in a legacy block; past the result a cell is #N/A.
+    The anchor of a dynamic spill is #SPILL! when the result is not exactly as big as the block Excel spilled it
+    into (the translation disagrees with Excel's own result); an UNRESOLVED marker wins over that check."""
+    from cellproof.compiler import Step
+    r1, c1, r2, c2 = box
+    rel = relation(c, node, sheet).sql
     markers = ", ".join(f"'{m}'" for m in SETTINGS)
-    first = f"(SELECT err FROM {u}_r WHERE i = 1 AND j = 1)"  # an UNRESOLVED marker wins over the size check
-    err = (f"({head} SELECT CASE WHEN {first} IN ({markers}) THEN {first} WHEN {size} THEN '#SPILL!' WHEN NOT EXISTS (SELECT 1 FROM {u}_e) THEN '#N/A' "
-           f"ELSE (SELECT err FROM {u}_e) END)")  # no FROM: a missing element still gives one row
-    return Expr(num, "any", err, txt, kind)
+    pos = ", ".join(f"({r}, {col}, {r - r1 + 1}, {col - c1 + 1})" for _, r, col in block)
+    size = (f"(p.pi = 1 AND p.pj = 1 AND (d.h <> {r2 - r1 + 1} OR d.w <> {c2 - c1 + 1}))" if dynamic else "FALSE")
+    err = (f"CASE WHEN f.e IN ({markers}) THEN f.e WHEN {size} THEN '#SPILL!' WHEN s.i IS NULL THEN '#N/A' "
+           f"ELSE s.err END")
+    sql = (f"WITH\nspill AS MATERIALIZED {rel},\n"
+           f"d AS (SELECT max(i) AS h, max(j) AS w FROM spill),\n"
+           f"f AS (SELECT (SELECT err FROM spill WHERE i = 1 AND j = 1) AS e),\n"
+           f"cellpos AS (SELECT * FROM (VALUES {pos}) v(row_num, col_num, pi, pj)),\n"
+           f"picked AS (SELECT p.row_num, p.col_num, s.kind, s.num, s.txt, {err} AS e FROM cellpos p CROSS JOIN d "
+           f"CROSS JOIN f LEFT JOIN spill s ON s.i = (CASE WHEN d.h = 1 THEN 1 ELSE p.pi END) "
+           f"AND s.j = (CASE WHEN d.w = 1 THEN 1 ELSE p.pj END))\n"
+           # an empty element spills as 0; an error is kind 'e' with its code as text, as in the cells table
+           f"SELECT {lit_str(sheet).sql} AS sheet, row_num, col_num, "
+           f"CASE WHEN e IS NOT NULL THEN 'e' WHEN kind IS NULL THEN 'n' ELSE kind END AS kind, "
+           f"CASE WHEN e IS NOT NULL THEN NULL WHEN kind IS NULL THEN CAST(0 AS DOUBLE) ELSE num END AS num, "
+           f"CASE WHEN e IS NOT NULL THEN e WHEN kind = 's' THEN COALESCE(txt, '') END AS txt FROM picked")
+    steps = [Step(k, Expr("NULL", "any", "'#N/A'"), f"s{n}") for n, k in enumerate(block, 1)]
+    return SpillBatch(steps, sql)
+
+
+@dataclass(frozen=True)
+class RelArray:
+    """A FILTER/SORT/UNIQUE result as the aggregates read an array (aggregate.Arr's agg/err_sql/rel)."""
+    sql: str
+    srcs: tuple = ("relation",)
+    shape: None = None
+
+    def rel(self) -> str:
+        # what an aggregate does with an empty element (skip it, or take it as 0) was not checked: UNCHECKED
+        return (f"(SELECT i AS row_num, j AS col_num, CASE WHEN kind IS NULL THEN 'e' ELSE kind END AS kind, num, "
+                f"txt, CASE WHEN kind IS NULL THEN '{UNCHECKED}' ELSE err END AS err FROM {self.sql} ra)")
+
+    def agg(self, fn: str, kinds: str = "('n')") -> str:
+        return f"(SELECT {fn} FROM {self.rel()} WHERE kind IN {kinds})"
+
+    def err_sql(self) -> str:
+        return f"(SELECT err FROM {self.rel()} WHERE err IS NOT NULL ORDER BY row_num, col_num LIMIT 1)"
+
+    def unchecked(self) -> str:
+        """An UNRESOLVED marker in the relation, which even COUNT (that skips errors) must not hide."""
+        markers = ", ".join(f"'{m}'" for m in SETTINGS)
+        return f"(SELECT err FROM {self.rel()} WHERE err IN ({markers}) LIMIT 1)"
+
+
+def as_array(c, node, sheet: str) -> RelArray:
+    return RelArray(relation(c, node, sheet).sql)
+
+
+def _size(name: str, col: str):
+    def fn(c, args, sheet):
+        if len(args) != 1:
+            raise Unsupported(f"{name} needs one argument")
+        a = args[0]
+        if isinstance(a, RefNode):
+            area = resolve(a.text, sheet, c.book)
+            return Expr(f"CAST({area.r2 - area.r1 + 1 if col == 'i' else area.c2 - area.c1 + 1} AS DOUBLE)", "num")
+        if isinstance(a, Call) and a.name in DYNAMIC:
+            rel = relation(c, a, sheet).sql
+            # an error result (FILTER's #CALC!, an UNCHECKED marker) is the answer, not a size of one
+            first = f"(SELECT err FROM {rel} rs WHERE i = 1 AND j = 1 AND kind = 'e' AND "
+            whole = f"{first} (SELECT COUNT(*) FROM {rel} rc) = 1)"
+            return Expr(f"(SELECT CAST(max({col}) AS DOUBLE) FROM {rel} rm)", "num", whole)
+        raise Unsupported(f"{name} of something other than a range, FILTER, SORT or UNIQUE not supported yet")
+    register(name)(fn)
+
+
+_size("ROWS", "i")
+_size("COLUMNS", "j")
 
 
 def _inside(name):

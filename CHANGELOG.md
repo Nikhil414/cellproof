@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 (2026-10-31)
+
+- **FILTER, SORT, UNIQUE inside other calculations:** `SUM(FILTER(...))`, `COUNTA(UNIQUE(...))`, AVERAGE, MIN, MAX,
+  PRODUCT, STDEV, VAR of them; **ROWS** and **COLUMNS** (of a range or of these). An empty element reaching an
+  aggregate is UNRESOLVED (whether Excel skips it or takes 0 was not checked), even through COUNT.
+- **XMATCH** (exact, next smaller/larger, wildcards; first-to-last or last-to-first), **SORTBY** (several keys; by
+  rows, or by columns when the keys are one row: real Excel), **SEQUENCE** (more than a million elements is
+  UNRESOLVED and builds nothing). FILTER's if_empty can be a range, which spills whole.
+- **Spills are one statement:** a spilled block is one batch computing its relation once (verify 1,334 cells
+  31.0 s -> 0.03 s; 33,334 cells in 0.7 s), and one dbt model.
+- **Not guessed:** XLOOKUP/XMATCH next smaller/larger across types or over text with punctuation (Excel ranks numbers
+  < text < TRUE/FALSE and orders text by its own collation), and exact text matches with a German sharp s (Excel
+  matched "ss" to it). Some of these used to PASS by luck; they are UNRESOLVED now.
+
 ## 0.4.0 (2026-10-31)
 
 - **Array formulas over a block** (legacy Ctrl+Shift+Enter blocks and dynamic-array spills) compile cell by cell:

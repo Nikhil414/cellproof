@@ -77,13 +77,13 @@ reader -> regions -> dependency graph -> compiler -> verifier -> dbt emitter -> 
    code.
 6. **Emit** the dbt project and the report.
 
-125 Excel functions are supported: ABS, AND, AVERAGE, AVERAGEIF(S), CEILING, CHAR, CHOOSE, CLEAN, CONCAT(ENATE),
-COUNT, COUNTA, COUNTBLANK, COUNTIF(S), DATE, DATEDIF, DAY, DAYS, DAYS360, EDATE, EOMONTH, EXACT, EXP, FILTER, FIND, FLOOR, FV,
+130 Excel functions are supported: ABS, AND, AVERAGE, AVERAGEIF(S), CEILING, CHAR, CHOOSE, CLEAN, CONCAT(ENATE),
+COUNT, COUNTA, COUNTBLANK, COUNTIF(S), DATE, DATEDIF, DAY, DAYS, DAYS360, EDATE, EOMONTH, COLUMNS, EXACT, EXP, FILTER, FIND, FLOOR, FV,
 HLOOKUP, IF, IFERROR, IFNA, IFS, INDEX, INT, IS* (BLANK, ERR, ERROR, LOGICAL, NA, NUMBER, TEXT), LARGE, LEFT, LEN, LET,
 LN, LOG, LOG10, LOOKUP, LOWER, MATCH, MAX, MAXIFS, MEDIAN, MID, MIN, MINIFS, MOD, MODE, MONTH, MROUND, NA, NETWORKDAYS,
 NOT, NPER, NPV, OR, PERCENTILE(.INC), PI, PMT, POWER, PRODUCT, PROPER, PV, QUARTILE(.INC), RANK(.EQ), REPLACE, REPT,
-RIGHT, ROUND(UP/DOWN), SEARCH, SIGN, SMALL, SQRT, STDEV(.S/.P/P), SUBSTITUTE, SUBTOTAL, SUM, SUMIF(S), SUMPRODUCT,
-SORT, SWITCH, TEXT, TEXTJOIN, TRIM, TRUE/FALSE, TRUNC, UNIQUE, UPPER, VALUE, VAR(.S/.P/P), VLOOKUP, WEEKDAY, WORKDAY, XLOOKUP, XOR,
+RIGHT, ROUND(UP/DOWN), ROWS, SEQUENCE, SEARCH, SIGN, SMALL, SQRT, STDEV(.S/.P/P), SUBSTITUTE, SUBTOTAL, SUM, SUMIF(S), SUMPRODUCT,
+SORT, SORTBY, SWITCH, TEXT, TEXTJOIN, TRIM, TRUE/FALSE, TRUNC, UNIQUE, UPPER, VALUE, VAR(.S/.P/P), VLOOKUP, WEEKDAY, WORKDAY, XLOOKUP, XMATCH, XOR,
 YEAR, YEARFRAC.
 
 **Excel tables:** structured references (`Sales[Amount]`, `Sales[@Qty]`, `Sales[[#This Row],[Qty]]`, `Sales[#Totals]`,
@@ -108,9 +108,10 @@ cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each re
   and `@` are read. **FILTER, SORT and UNIQUE** spill their results and nest in each other; a dynamic spill whose
   result is not exactly as big as the block Excel saved shows #SPILL! in its first cell (a FAIL). The generated SQL
   computes the block Excel saved: if the data later changes the size of a FILTER's result, re-run cellproof.
-  Not yet: SORTBY, SEQUENCE, XMATCH, TAKE/DROP/CHOOSECOLS and the other array functions, FILTER/SORT/UNIQUE inside
-  another calculation (`ROWS(UNIQUE(...))`), SORT by several keys or by columns, SORT keys that are empty, errors or
-  text with punctuation (Excel's own text order), UNIQUE over empty cells or errors - all UNRESOLVED.
+  SORTBY, SEQUENCE and XMATCH too, and all of them inside aggregates (`SUM(FILTER(...))`, `ROWS(UNIQUE(...))`).
+  Not yet: TAKE/DROP/CHOOSECOLS and the other array functions, these functions inside other non-aggregate
+  calculations, SORT by several keys or by columns (SORTBY does both), SORT/SORTBY keys that are empty, errors or text
+  with punctuation (Excel's own text order), UNIQUE over empty cells or errors - all UNRESOLVED.
 - **Array arithmetic in aggregates** (`SUM(A1:A10*B1:B10)`, `SUMPRODUCT((A1:A9>5)*C1:C9)`, `MAX(IF(A1:A9="x",B1:B9))`,
   `SUM(IFERROR(A1:A9/B1:B9,0))`, `COUNTA(A1:A9&B1:B9)`, `SUM(A1:A9^2)`) follows modern Excel: element by element, an
   empty element is 0, text converts when it is a number ("3" -> 3) and is #VALUE! otherwise, comparisons rank
