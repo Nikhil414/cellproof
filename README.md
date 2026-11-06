@@ -177,7 +177,7 @@ cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each re
 - **Floating point:** a running total becomes a fast window function only when Excel's saved values prove the different
   addition order cannot matter; balances that cancel back to zero (ledgers) are added in Excel's order instead, which
   is slower. Elsewhere SQL can still differ from Excel in the last digits, which would show as an honest FAIL. A
-  number that overflows becomes `inf` instead of `#NUM!`.
+  number that overflows in `+`, `-`, `*`, `/` or `^` becomes `#NUM!`; overflow inside aggregate functions can still become `inf`.
 - **Speed:** regions cover columns that repeat one formula over the same rows, lookups and *IF(S) criteria included.
   A formula that is not part of such a column runs cell by cell (a lookup alone: about 7 s per 1,000). Running totals
   other than plain sums (`=C1*1.05+B2`, `=MAX(C1,B2)`) also run cell by cell.

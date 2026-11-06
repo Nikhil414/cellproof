@@ -89,7 +89,7 @@ What Excel taught us (each has a test in `tests/test_excel_findings.py`):
   piece that needs a second split stay in cell mode.
 - Compile on the 200k run is 11.3 s: the dependency-order loop and reference resolving, one pass per cell. Next step
   there would be ordering a region's cells per formula shape instead of per cell. Read (8.3 s, openpyxl) is the other half.
-- Minors: a DuckDB error in one batch stops the run (cleanly: exit 3 naming the cell; none known); overflow gives `inf`, not `#NUM!`; workbook text equal to the
+- Minors: a DuckDB error in one batch stops the run (cleanly: exit 3 naming the cell; none known); arithmetic overflow is `#NUM!`, but overflow inside aggregates can still give `inf`; workbook text equal to the
   placeholder `__cellproof_cells__` is rewritten; computed-answer results are not counted separately; old tables stay in
   `cellproof.duckdb` after a rerun.
 - Backlog for one more Excel round: number -> text below 1E-11, `(-8)^(2/3)`, `(-16)^(1/4)`, `DATE(1900,13,1)`.

@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from cellproof.expr import bool_num
-from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, errs, lit_str, num, num_text, parse_num, where_area,
+from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, errs, finite_num, lit_str, num, num_text, parse_num, where_area,
                             _text_bool)
 from cellproof.functions import arity, note_text_numbers, register
 from cellproof.model import Unsupported
@@ -131,6 +131,7 @@ def _arith(l: Arr, r: Arr, op: str) -> Arr:
            f"WHEN {lnum} IS NULL THEN '#VALUE!' WHEN {rnum} IS NULL THEN '#VALUE!'"
            + (f" WHEN COALESCE({rnum}, 0) = 0 THEN '#DIV/0!'" if op == "/" else "") + " END")
     val = f"({lnum} / NULLIF({rnum}, 0))" if op == "/" else f"({lnum} {op} {rnum})"
+    err = finite_num(val, err).err
     num = f"CASE WHEN {err} IS NOT NULL THEN NULL ELSE {val} END"
     return _merged(l, r, "'n'", num, "CAST(NULL AS VARCHAR)", err)
 
@@ -161,6 +162,7 @@ def _power_array(l: Arr, r: Arr) -> Arr:
            f"WHEN {lnum} = 0 AND {rnum} = 0 THEN '#NUM!' "
            f"WHEN {lnum} < 0 AND {rnum} <> FLOOR({rnum}) AND NOT {odd_root} THEN '#NUM!' END")
     val = f"(CASE WHEN {odd_root} THEN -POWER(-{lnum}, {rnum}) ELSE POWER({lnum}, {rnum}) END)"
+    err = finite_num(val, err).err
     return _merged(l, r, "'n'", f"CASE WHEN {err} IS NOT NULL THEN NULL ELSE {val} END",
                    "CAST(NULL AS VARCHAR)", err)
 
