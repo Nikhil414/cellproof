@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.0 (unreleased)
+
+- **Postgres target:** `cellproof convert book.xlsx --target postgres [--pg-url URL] [--dbt]`. Every cell is verified
+  on DuckDB, then again on Postgres with the SQL translated (sqlglot, tree rewrites, and `pg_temp` helper functions with
+  DuckDB's semantics). On the 85 public test workbooks Postgres gives the same verdicts as DuckDB: 11,080 PASS, the
+  same 16 FAIL, none new. A batch that does not translate or run makes its cells UNRESOLVED, and the book is compiled
+  again so every cell reading them is too: the dbt project only holds SQL that ran on Postgres.
+- **dbt-postgres project:** with `--target postgres` the generated project targets dbt-postgres. Its helpers are
+  created in the target schema by an `on-run-start` macro, and `profiles.yml` reads `CELLPROOF_PG_*` environment
+  variables. `--dbt` runs `dbt build` on the Postgres that verified the workbook. New extras: `postgres`,
+  `dbt-postgres`.
+- **Browser playground** (https://nikhil414.github.io/cellproof/): drop a workbook, get every verdict and the dbt
+  project, in the page (Pyodide, DuckDB 1.2); nothing is uploaded. CONCAT and TEXTJOIN no longer need DuckDB 1.3.
+- CI: a Postgres 16 service runs the Postgres tests and dbt build on every push.
+
 ## 0.6.1 (2026-10-31)
 
 - **ROUND rounds the value Excel shows** (15 significant digits, half away from zero): `ROUND(1.005, 2)` is 1.01,

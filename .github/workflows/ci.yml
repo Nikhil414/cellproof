@@ -27,3 +27,27 @@ jobs:
         run: python -m pytest tests -q
         env:
           DBT_SEND_ANONYMOUS_USAGE_STATS: "False"
+
+  postgres:
+    # the Postgres target: verification on a real Postgres and dbt build with dbt-postgres
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: cellproof
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e ".[dev,postgres,dbt-postgres]"
+      - name: Test
+        run: python -m pytest tests/test_postgres.py -q
+        env:
+          CELLPROOF_TEST_PG_URL: postgresql://postgres:cellproof@localhost:5432/postgres
+          DBT_SEND_ANONYMOUS_USAGE_STATS: "False"
