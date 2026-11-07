@@ -7,6 +7,8 @@ date formats to FORMATS.
 """
 from __future__ import annotations
 
+import functools
+
 from cellproof.expr import BLANK, CELLS, NO_ERR, PLATFORM, UNCHECKED, Expr, errs, num, num_strict, num_text, txt, where_area
 from cellproof.functions import arity, register
 from cellproof.model import Unsupported
@@ -67,13 +69,18 @@ def _pieces(c, args, sheet: str, keep_blanks: bool) -> tuple[list[str], list[str
     return lists, err
 
 
+def _joined(lists: list[str]) -> str:
+    """One list of all the pieces. list_concat in pairs: more than two arguments needs DuckDB 1.3 (the browser
+    playground runs 1.2)."""
+    return functools.reduce(lambda a, b: f"list_concat({a}, {b})", lists)
+
+
 @register("CONCAT")
 def concat(c, args, sheet):
     if not args:
         raise Unsupported("CONCAT needs arguments")
     lists, err = _pieces(c, args, sheet, keep_blanks=False)
-    return Expr(f"array_to_string(list_concat({', '.join(lists)}), '')" if len(lists) > 1
-                else f"array_to_string({lists[0]}, '')", "txt", errs(*err))
+    return Expr(f"array_to_string({_joined(lists)}, '')", "txt", errs(*err))
 
 
 @register("TEXTJOIN")
@@ -82,7 +89,7 @@ def textjoin(c, args, sheet):
         raise Unsupported("TEXTJOIN needs a delimiter, TRUE/FALSE written in the formula, and values")
     delim = _t(c, args[0], sheet)
     lists, err = _pieces(c, args[2:], sheet, keep_blanks=not args[1].value)
-    items = f"list_concat({', '.join(lists)})" if len(lists) > 1 else lists[0]
+    items = _joined(lists)
     if args[1].value:
         items = f"list_filter({items}, lambda x: x <> '')"
     return Expr(f"array_to_string({items}, {delim.sql})", "txt", errs(delim.err, *err))

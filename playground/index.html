@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cellproof playground</title>
+<meta name="description" content="Turn an Excel workbook into SQL and prove every number matches. Runs in your browser: your file never leaves your computer.">
+<meta property="og:title" content="cellproof: prove your spreadsheet's SQL matches Excel">
+<meta property="og:description" content="Drop an .xlsx, get every formula as SQL, checked cell by cell against the values Excel saved. Runs entirely in your browser.">
+<style>
+  :root {
+    --bg: #0b0f14; --panel: #111821; --line: #1e2834; --ink: #f5f7fa; --dim: #8b95a5; --soft: #c9d1db;
+    --pass: #22c55e; --fail: #ef4444; --unres: #f59e0b; --accent: #38bdf8;
+    --mono: ui-monospace, Menlo, "SF Mono", Consolas, monospace;
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f8fa; --panel: #ffffff; --line: #e3e7ec; --ink: #0f172a; --dim: #5b6676; --soft: #334155;
+    --pass: #16a34a; --fail: #dc2626; --unres: #d97706; --accent: #0284c7;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f7f8fa; --panel: #ffffff; --line: #e3e7ec; --ink: #0f172a; --dim: #5b6676; --soft: #334155;
+      --pass: #16a34a; --fail: #dc2626; --unres: #d97706; --accent: #0284c7;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
+  .logo { font-weight: 800; font-size: 22px; letter-spacing: -0.5px; color: var(--ink); text-decoration: none; }
+  .logo b { color: var(--pass); }
+  .nav a { margin-left: 18px; color: var(--soft); text-decoration: none; font-size: 15px; }
+  .nav a:hover { color: var(--ink); }
+  h1 { font-size: clamp(30px, 5vw, 48px); line-height: 1.1; letter-spacing: -1px; margin: 28px 0 12px; }
+  .lede { color: var(--soft); font-size: 18px; max-width: 720px; margin: 0 0 8px; }
+  .private { display: inline-flex; gap: 8px; align-items: center; color: var(--pass); font-size: 14px; margin: 6px 0 24px; }
+  .drop { display: block; border: 2px dashed var(--line); border-radius: 18px; padding: 40px 20px; text-align: center; background: var(--panel);
+    transition: border-color .15s, background .15s; cursor: pointer; }
+  .drop.over { border-color: var(--pass); background: color-mix(in srgb, var(--pass) 8%, var(--panel)); }
+  .drop strong { font-size: 19px; }
+  .drop p { color: var(--dim); margin: 6px 0 0; font-size: 14px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+  button, .btn { font: inherit; font-size: 15px; border-radius: 10px; padding: 9px 16px; border: 1px solid var(--line); background: var(--panel);
+    color: var(--ink); cursor: pointer; text-decoration: none; display: inline-block; }
+  button:hover, .btn:hover { border-color: var(--dim); }
+  button.primary { background: var(--pass); border-color: var(--pass); color: #04130a; font-weight: 700; }
+  button:disabled { opacity: .5; cursor: progress; }
+  .status { color: var(--dim); font-size: 14px; }
+  .status.err { color: var(--fail); }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--dim); border-top-color: transparent; border-radius: 50%;
+    animation: r 0.8s linear infinite; vertical-align: -1px; margin-right: 6px; }
+  @keyframes r { to { transform: rotate(360deg); } }
+  #results { display: none; margin-top: 34px; }
+  .file { color: var(--dim); font-family: var(--mono); font-size: 14px; }
+  .counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 14px 0 22px; }
+  .count { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; border-left-width: 6px; }
+  .count .n { font-size: 34px; font-weight: 800; line-height: 1; }
+  .count .l { color: var(--dim); font-size: 13px; letter-spacing: 1.5px; margin-top: 6px; }
+  .count.pass { border-left-color: var(--pass); } .count.pass .n { color: var(--pass); }
+  .count.fail { border-left-color: var(--fail); } .count.fail .n { color: var(--fail); }
+  .count.unres { border-left-color: var(--unres); } .count.unres .n { color: var(--unres); }
+  h2 { font-size: 20px; margin: 28px 0 10px; }
+  .groups { display: grid; gap: 8px; }
+  .group { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; gap: 14px; align-items: baseline; }
+  .group .k { font-weight: 800; color: var(--unres); min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
+  .group .why { flex: 1; }
+  .group .ex { color: var(--dim); font-family: var(--mono); font-size: 12px; }
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .tabs button[aria-pressed="true"] { border-color: var(--ink); }
+  .tabs input { flex: 1; min-width: 160px; font: inherit; font-size: 15px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink); }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
+  td.c, td.v { font-family: var(--mono); font-size: 13px; white-space: nowrap; }
+  td.v { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+  td.s { font-weight: 800; font-size: 12px; letter-spacing: 1px; }
+  .PASS { color: var(--pass); } .FAIL { color: var(--fail); } .UNRESOLVED { color: var(--unres); }
+  td.r { color: var(--soft); min-width: 260px; }
+  .more { margin: 10px 0 0; }
+  .findings { color: var(--soft); font-size: 14px; padding-left: 20px; }
+  .cta { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 22px; margin: 40px 0; }
+  .cta code { font-family: var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: inline-block; }
+  .how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 34px 0 0; }
+  .how div { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .how b { display: block; margin-bottom: 4px; }
+  .how span { color: var(--dim); font-size: 14px; }
+  footer { color: var(--dim); font-size: 13px; padding: 26px 0 40px; border-top: 1px solid var(--line); }
+  @media (max-width: 640px) { .counts, .how { grid-template-columns: 1fr; } .nav a:not(.gh) { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="logo" href="./">cell<b>proof</b></a>
+    <nav class="nav">
+      <a href="https://pypi.org/project/cellproof/">PyPI</a>
+      <a href="https://github.com/Nikhil414/cellproof#readme">Docs</a>
+      <a class="gh" href="https://github.com/Nikhil414/cellproof">★ GitHub</a>
+    </nav>
+  </header>
+
+  <h1>Turn an Excel workbook into SQL,<br>and prove every number matches.</h1>
+  <p class="lede">Drop in an <code>.xlsx</code>. cellproof translates every formula to SQL, runs it on DuckDB, and checks each
+    result against the value Excel itself saved. Each formula cell is PASS, FAIL, or UNRESOLVED with the reason. It never guesses.</p>
+  <div class="private">🔒 Runs entirely in your browser. Your workbook is never uploaded.</div>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept=".xlsx,.xlsm" hidden>
+    <strong>Drop an Excel workbook here</strong>
+    <p>or click to choose a file (.xlsx / .xlsm, saved by Excel)</p>
+  </label>
+  <div class="row">
+    <button class="primary" id="example">Try the example workbook</button>
+    <span class="status" id="status"><span class="spin"></span>Starting…</span>
+  </div>
+
+  <section id="results" aria-live="polite">
+    <div class="file" id="fname"></div>
+    <div class="counts">
+      <div class="count pass"><div class="n" id="nPASS">0</div><div class="l">PASS</div></div>
+      <div class="count fail"><div class="n" id="nFAIL">0</div><div class="l">FAIL</div></div>
+      <div class="count unres"><div class="n" id="nUNRESOLVED">0</div><div class="l">UNRESOLVED</div></div>
+    </div>
+    <div class="row">
+      <button id="dlzip">Download the dbt project (.zip)</button>
+      <button id="dlmd">Download REPORT.md</button>
+    </div>
+
+    <div id="groupsBox">
+      <h2>Where to start</h2>
+      <p class="status">Unresolved cells grouped by the reason, ranked by how many cells each one holds back.</p>
+      <div class="groups" id="groups"></div>
+    </div>
+
+    <h2>Every formula cell</h2>
+    <div class="tabs" id="tabs">
+      <button data-f="ALL" aria-pressed="true">All</button>
+      <button data-f="PASS" aria-pressed="false">PASS</button>
+      <button data-f="FAIL" aria-pressed="false">FAIL</button>
+      <button data-f="UNRESOLVED" aria-pressed="false">UNRESOLVED</button>
+      <input id="q" type="search" placeholder="Filter by cell or reason" aria-label="Filter cells">
+    </div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Cell</th><th>Status</th><th>Excel saved</th><th>SQL gave</th><th>Why</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    <button class="more" id="more" hidden>Show more</button>
+
+    <div id="findBox"><h2>Findings</h2><ul class="findings" id="findings"></ul></div>
+  </section>
+
+  <div class="how">
+    <div><b>1 · Translate</b><span>Every formula becomes SQL with Excel's own rules: types, error codes, the order errors win.</span></div>
+    <div><b>2 · Verify</b><span>Each cell is checked against the value Excel saved in the file. A free answer key.</span></div>
+    <div><b>3 · Ship</b><span>You get a dbt project on DuckDB that runs exactly the SQL that was checked.</span></div>
+  </div>
+
+  <div class="cta">
+    <b>Use it on your machine or in CI</b>
+    <p class="status">Same engine, plus <code>--dbt</code> to run dbt build. Free and MIT-licensed.</p>
+    <code>pip install cellproof &amp;&amp; cellproof convert book.xlsx</code>
+    <p class="status">A formula it gets wrong? <a href="https://github.com/Nikhil414/cellproof/issues/4">Tell us the formula</a> (not your data).</p>
+  </div>
+
+  <footer>
+    <span id="engine">cellproof</span> · Python and DuckDB compiled to WebAssembly (Pyodide). The page downloads them once; the workbook stays in this tab.
+  </footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const show = (v) => v === null || v === undefined ? "" : typeof v === "number" ? String(v) : typeof v === "boolean" ? (v ? "TRUE" : "FALSE") : v;
+const status = (html, err = false) => { $("status").innerHTML = html; $("status").className = "status" + (err ? " err" : ""); };
+
+const worker = new Worker("worker.js");
+let ready = false, busy = false, last = null, filter = "ALL", shown = 0;
+const PAGE = 300;
+
+worker.onmessage = ({ data: { type, data } }) => {
+  if (type === "status") status(`<span class="spin"></span>${esc(data)}`);
+  if (type === "ready") { ready = true; $("engine").textContent = data; status("Ready. Drop a workbook or try the example."); }
+  if (type === "fatal") status(`Could not start: ${esc(data)}. Try reloading the page.`, true);
+  if (type === "error") { busy = false; status(`Something went wrong: ${esc(data)}`, true); }
+  if (type === "result") { busy = false; render(JSON.parse(data.json), data.zip, data.ms); }
+};
+
+function convert(name, bytes) {
+  if (busy) return;
+  if (!/\.xls[xm]$/i.test(name)) { status("Please choose an .xlsx or .xlsm file.", true); return; }
+  busy = true;
+  status(`<span class="spin"></span>${ready ? "Converting" : "Starting up, then converting"} ${esc(name)}…`);
+  last = { name };
+  worker.postMessage({ name, bytes }, [bytes]);
+}
+
+function render(res, zip, ms) {
+  last.zip = zip;
+  last.md = res.report_md || "";
+  if (!res.report) { status(`cellproof could not read this file: ${esc(res.log.trim().split("\n").pop())}`, true); return; }
+  const r = res.report;
+  last.cells = r.cells;
+  $("results").style.display = "block";
+  $("fname").textContent = `${r.source} · ${r.cells.length.toLocaleString()} formula cells · ${(ms / 1000).toFixed(1)} s`;
+  for (const k of ["PASS", "FAIL", "UNRESOLVED"]) $("n" + k).textContent = (r.counts[k] || 0).toLocaleString();
+  const groups = r.unresolved_groups || [];
+  $("groupsBox").hidden = !groups.length;
+  $("groups").innerHTML = groups.slice(0, 8).map((g) =>
+    `<div class="group"><span class="k">${(g.cells + g.dependents).toLocaleString()}</span><span class="why">${esc(g.reason)}<br>
+     <span class="ex">${esc(g.examples.join(", "))}${g.dependents ? ` · ${g.dependents.toLocaleString()} more cells depend on these` : ""}</span></span></div>`).join("");
+  const finds = r.findings || [];
+  $("findBox").hidden = !finds.length;
+  $("findings").innerHTML = finds.slice(0, 20).map((f) => `<li>${esc(f)}</li>`).join("") + (finds.length > 20 ? `<li>… ${finds.length - 20} more in REPORT.md</li>` : "");
+  status(res.code === 3 ? "Done, with an internal error on some cells (marked UNRESOLVED). Please report it." : "Done.");
+  table(true);
+  $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function table(reset) {
+  const q = $("q").value.trim().toLowerCase();
+  const rows = last.cells.filter((c) => (filter === "ALL" || c.status === filter) &&
+    (!q || c.cell.toLowerCase().includes(q) || (c.reason || "").toLowerCase().includes(q)));
+  if (reset) { shown = 0; $("rows").innerHTML = ""; }
+  const next = rows.slice(shown, shown + PAGE);
+  $("rows").insertAdjacentHTML("beforeend", next.map((c) =>
+    `<tr><td class="c">${esc(c.cell)}</td><td class="s ${c.status}">${c.status}</td><td class="v" title="${esc(show(c.expected))}">${esc(show(c.expected))}</td>` +
+    `<td class="v" title="${esc(show(c.actual))}">${esc(show(c.actual))}</td><td class="r">${esc(c.reason)}${c.answer === "computed" ? " (expected value computed, not saved by Excel)" : ""}</td></tr>`).join(""));
+  shown += next.length;
+  $("more").hidden = shown >= rows.length;
+  $("more").textContent = `Show more (${(rows.length - shown).toLocaleString()} left)`;
+}
+
+$("tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b || !last?.cells) return;
+  filter = b.dataset.f;
+  for (const x of $("tabs").querySelectorAll("button")) x.setAttribute("aria-pressed", String(x === b));
+  table(true);
+});
+$("q").addEventListener("input", () => last?.cells && table(true));
+$("more").addEventListener("click", () => table(false));
+
+const save = (blob, name) => { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
+const stem = () => last.name.replace(/\.xls[xm]$/i, "");
+$("dlzip").addEventListener("click", () => save(new Blob([last.zip], { type: "application/zip" }), `${stem()}_dbt.zip`));
+$("dlmd").addEventListener("click", () => save(new Blob([last.md], { type: "text/markdown" }), "REPORT.md"));
+
+const drop = $("drop");
+$("file").addEventListener("change", async (e) => { const f = e.target.files[0]; if (f) convert(f.name, await f.arrayBuffer()); e.target.value = ""; });
+for (const ev of ["dragenter", "dragover"]) drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); });
+for (const ev of ["dragleave", "drop"]) drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); });
+drop.addEventListener("drop", async (e) => { const f = e.dataTransfer.files[0]; if (f) convert(f.name, await f.arrayBuffer()); });
+$("example").addEventListener("click", async () => convert("functions.xlsx", await (await fetch("functions.xlsx")).arrayBuffer()));
+</script>
+</body>
+</html>

@@ -9,7 +9,10 @@
 
 <img src="docs/demo.gif" alt="cellproof converting a workbook: every formula checked against Excel's saved value" width="320" align="right">
 
-**Try it in 30 seconds:**
+**[Try it in your browser](https://nikhil414.github.io/cellproof/)**: drop a workbook, get every verdict and the dbt
+project back. It runs entirely in the page (Python and DuckDB in WebAssembly); your file is never uploaded.
+
+**Or on your machine, in 30 seconds:**
 
 ```bash
 pip install cellproof
