@@ -174,7 +174,8 @@ cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each re
 - **Edge cases not checked in real Excel yet** are UNRESOLVED with that reason, never guessed: PMT/PV/FV/NPER with
   zero periods, a rate of -100% or less or a payment type other than 0 or 1; NPV at a rate of -100%; LARGE/SMALL with
   a k that is not whole; RANK over a range holding an error; NETWORKDAYS/WORKDAY with text or errors among the
-  holidays. NETWORKDAYS.INTL, WORKDAY.INTL, IRR, RATE and the other finance and statistics functions are not in yet.
+  holidays. NETWORKDAYS.INTL, WORKDAY.INTL and the other finance and statistics functions outside the list above are not in
+  yet.
 - **Some function options:** SUBTOTAL 101-111 (hidden rows), DATEDIF units MD/YM/YD, WEEKDAY types 11-17, TEXT formats
   outside the supported table, COUNT or MEDIAN of values typed into the formula, criteria taken from an empty cell.
 - **Floating point:** a running total becomes a fast window function only when Excel's saved values prove the different
