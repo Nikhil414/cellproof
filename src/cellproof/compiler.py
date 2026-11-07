@@ -17,7 +17,7 @@ from pathlib import Path
 import cellproof.fn  # noqa: F401  (registers the function library)
 from openpyxl.utils import range_boundaries
 
-from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, bool_num, any_of, compare, error, errs, finalize, lit_num, lit_str, num,
+from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, bool_num, any_of, compare, error, errs, finite_num, finalize, lit_num, lit_str, num,
                           txt, where_cell)
 from cellproof.fn.dynamic import DYNAMIC, spill_batch
 from cellproof.functions import FUNCS
@@ -258,9 +258,9 @@ class Compiler:
         if op in ARITH or op in ("/", "^"):
             x, y = num(a), num(b)
             if op in ARITH:
-                return Expr(f"({x.sql} {op} {y.sql})", "num", errs(x.err, y.err))
+                return finite_num(f"({x.sql} {op} {y.sql})", errs(x.err, y.err))
             if op == "/":  # DuckDB gives inf, Excel #DIV/0!
-                return Expr(f"({x.sql} / NULLIF({y.sql}, 0))", "num",
+                return finite_num(f"({x.sql} / NULLIF({y.sql}, 0))",
                             errs(x.err, y.err, f"(CASE WHEN {y.sql} = 0 THEN '#DIV/0!' END)"))
             # DuckDB POWER returns inf or nan where Excel returns an error (verified on 1.5.6)
             # Real Excel: (-8)^(1/3) is -1.9999999999999998, the real cube root: a negative number to the power of
@@ -271,8 +271,8 @@ class Compiler:
             bad = (f"(CASE WHEN {x.sql} = 0 AND {y.sql} < 0 THEN '#DIV/0!' "
                    f"WHEN {x.sql} = 0 AND {y.sql} = 0 THEN '#NUM!' "
                    f"WHEN {x.sql} < 0 AND {y.sql} <> FLOOR({y.sql}) AND NOT {odd_root} THEN '#NUM!' END)")
-            return Expr(f"(CASE WHEN {odd_root} THEN -POWER(-{x.sql}, {y.sql}) ELSE POWER({x.sql}, {y.sql}) END)",
-                        "num", errs(x.err, y.err, bad))
+            return finite_num(f"(CASE WHEN {odd_root} THEN -POWER(-{x.sql}, {y.sql}) ELSE POWER({x.sql}, {y.sql}) END)",
+                              errs(x.err, y.err, bad))
         if op == "&":
             x, y = txt(a), txt(b)
             return Expr(f"({x.sql} || {y.sql})", "txt", errs(x.err, y.err))

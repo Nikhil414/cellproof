@@ -28,12 +28,12 @@ src AS (
     MAX(num) FILTER (WHERE col_num = 1) AS amount
   FROM __cellproof_cells__ WHERE sheet = 'S' AND row_num BETWEEN 2 AND 4 AND col_num IN (1) GROUP BY row_num),
 tax AS (
-  SELECT *, (_.amount * CAST(1.1 AS DOUBLE)) AS tax
+  SELECT *, (_.amount * CAST(1.1 AS DOUBLE)) AS tax, CAST((CASE WHEN NOT isfinite((_.amount * CAST(1.1 AS DOUBLE))) THEN '#NUM!' END) AS VARCHAR) AS tax__err
   FROM src AS _),
 big AS (
-  SELECT *, (CASE WHEN (_.tax > CAST(100.0 AS DOUBLE)) THEN _.tax ELSE CAST(0.0 AS DOUBLE) END) AS big
+  SELECT *, (CASE WHEN (_.tax > CAST(100.0 AS DOUBLE)) THEN _.tax ELSE CAST(0.0 AS DOUBLE) END) AS big, CAST(COALESCE(_.tax__err, (CASE WHEN (_.tax > CAST(100.0 AS DOUBLE)) THEN _.tax__err ELSE NULL END)) AS VARCHAR) AS big__err
   FROM tax AS _)
-SELECT row_num, tax, big
+SELECT row_num, tax, tax__err, big, big__err
 FROM big"""
 
 
@@ -43,9 +43,11 @@ def test_the_wide_model_reads_as_plain_sql():  # the readability contract, revie
     assert rejected == {} and batch.wide_sql == GOLDEN_WIDE
     assert batch.model == "region_s_2_4"
     assert batch.unpivot("wide") == (
-        "SELECT 'S', row_num, 2, 'n', CAST(tax AS DOUBLE), NULL FROM wide\n"
+        "SELECT 'S', row_num, 2, CASE WHEN tax__err IS NULL THEN 'n' ELSE 'e' END, "
+        "CASE WHEN tax__err IS NULL THEN CAST(tax AS DOUBLE) END, tax__err FROM wide\n"
         "UNION ALL\n"
-        "SELECT 'S', row_num, 3, 'n', CAST(big AS DOUBLE), NULL FROM wide")
+        "SELECT 'S', row_num, 3, CASE WHEN big__err IS NULL THEN 'n' ELSE 'e' END, "
+        "CASE WHEN big__err IS NULL THEN CAST(big AS DOUBLE) END, big__err FROM wide")
     assert len(batch) == 6 and batch[0].key == ("S", 2, 2)
 
 
@@ -414,7 +416,7 @@ def test_the_error_typed_column_reference_is_qualified():
         spec[f"C{r}"] = (f"=B{r}+A{r}", "#N/A")
     book = book_of({"S": spec})
     batch, _ = compile_region(Compiler(book), find_regions(book).regions[0])
-    assert "CAST(_.col_b__err AS VARCHAR)" in batch.wide_sql
+    assert "CAST(COALESCE(_.col_b__err," in batch.wide_sql
     _whole_run_equal(book)
 
 

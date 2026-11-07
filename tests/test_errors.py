@@ -90,3 +90,53 @@ def test_error_codes_must_match_exactly():
     assert not matches(cell, "e", None, "#DIV/0!")
     assert not matches(cell, "n", None, None)
     assert not matches(Cell("S", 1, 1, "x", 1.0, "n"), "e", None, "#N/A")
+
+
+def test_arithmetic_overflow_in_cells_and_regions():
+    from cellproof.verifier import verify
+
+    sheet = {}
+    for row in range(1, 5):
+        sheet[f'A{row}'] = 1e308
+        for col, formula in zip('BCDEF', [f'A{row}+A{row}', f'-A{row}-A{row}',
+                                         f'A{row}*10', f'A{row}/0.1', f'A{row}^2']):
+            sheet[f'{col}{row}'] = ('=' + formula, '#NUM!')
+        sheet[f'G{row}'] = (f'=IFERROR(B{row},7)', 7)
+        sheet[f'H{row}'] = (f'=A{row}/0', '#DIV/0!')
+        sheet[f'I{row}'] = (f'=A{row}/10', 1e307)
+    book = book_of({'S': sheet})
+    for regions in (False, True):
+        compiled = compile_book(book, regions=regions)
+        assert not compiled.unresolved
+        verdicts = list(verify(book, compiled))
+        assert len(verdicts) == 32
+        assert all(v.status == 'PASS' for v in verdicts)
+
+
+def test_arithmetic_overflow_in_arrays():
+    from cellproof.verifier import verify
+
+    sheet = {'A1': 1e308, 'A2': 1e308}
+    for row, formula in enumerate(['A1:A2+A1:A2', '-A1:A2-A1:A2', 'A1:A2*10',
+                                   'A1:A2/0.1', 'A1:A2^2'], 1):
+        sheet[f'B{row}'] = (f'=SUM({formula})', '#NUM!')
+    book = book_of({'S': sheet})
+    compiled = compile_book(book)
+    assert not compiled.unresolved
+    verdicts = list(verify(book, compiled))
+    assert len(verdicts) == 5
+    assert all(v.status == 'PASS' for v in verdicts)
+
+
+def test_overflow_criteria_propagate_through_conditional_aggregates():
+    got, compiled = run({'S': {
+        'A1': 1e308, 'A2': 1,
+        'B1': ('=COUNTIF(A1:A2,A1*10)', '#NUM!'),
+        'B2': ('=COUNTIFS(A1:A2,A1*10)', '#NUM!'),
+        'B3': ('=SUMIF(A1:A2,A1*10)', '#NUM!'),
+        'B4': ('=AVERAGEIF(A1:A2,A1*10)', '#NUM!'),
+        'B5': ('=MINIFS(A1:A2,A1:A2,A1*10)', '#NUM!'),
+        'B6': ('=MAXIFS(A1:A2,A1:A2,A1*10)', '#NUM!'),
+    }})
+    assert not compiled.unresolved
+    assert [got[('S', row, 2)] for row in range(1, 7)] == [E('#NUM!')] * 6

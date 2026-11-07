@@ -66,6 +66,11 @@ def errs(*parts: str) -> str:
     return live[0] if len(live) == 1 else f"COALESCE({', '.join(live)})"
 
 
+def finite_num(sql: str, err: str = NO_ERR) -> Expr:
+    """Keep earlier errors; arithmetic overflow is Excel's #NUM!, not an infinite value."""
+    return Expr(sql, "num", errs(err, f"(CASE WHEN NOT isfinite({sql}) THEN '#NUM!' END)"))
+
+
 def any_of(kind: str, num_sql: str, txt_sql: str, err: str = NO_ERR) -> Expr:
     return Expr(num_sql, "any", err, txt_sql, kind)
 

@@ -33,8 +33,6 @@ def match_sql(alias: str, crit: Expr, q: str) -> tuple[str, str, str]:
     A text criterion is parsed once, in the one-row table `q` the caller puts in its FROM clause:
     repeating the criterion SQL inside every comparison overflowed DuckDB's expression depth.
     """
-    if crit.err != NO_ERR:
-        raise Unsupported("criteria that can be an error not supported yet")
     if crit.type == "blank":
         raise Unsupported("criteria from an empty cell not supported yet")
     k, n, t = f"{alias}.kind", f"{alias}.num", f"COALESCE({alias}.txt, '')"  # the seed CSV reads '' back as NULL
@@ -111,11 +109,12 @@ def _joined(pairs, base: str, base_r1) -> tuple[str, str, str]:
 def countif(c, args, sheet):
     arity("COUNTIF", args, 2, 2)
     area, _ = _range(c, args[0], sheet, "COUNTIF")
-    match, blank, source = match_sql("x", c.expr(args[1], sheet), "q1")
+    crit = c.expr(args[1], sheet)
+    match, blank, source = match_sql("x", crit, "q1")
     size = (area.r2 - area.r1 + 1) * (area.c2 - area.c1 + 1)
     inside = f"FROM {CELLS} x WHERE {where_area(area, 'x')}"
     return Expr(f"(SELECT (SELECT COUNT(*) FILTER (WHERE {match}) {inside}) "
-                f"+ CASE WHEN {blank} THEN {size} - (SELECT COUNT(*) {inside}) ELSE 0 END FROM {source})", "num")
+                f"+ CASE WHEN {blank} THEN {size} - (SELECT COUNT(*) {inside}) ELSE 0 END FROM {source})", "num", crit.err)
 
 
 @register("COUNTIFS")
@@ -128,7 +127,8 @@ def countifs(c, args, sheet):
     tables, joins, cond, blanks = _joined(pairs, "o.off", 0)
     o = f"({rows}) o"  # a derived table, not a CTE: DuckDB cannot bind a CTE inside a subquery on a row's value
     return Expr(f"(SELECT (SELECT COUNT(*) FILTER (WHERE {cond}) FROM {o} {joins}) "
-                f"+ CASE WHEN {blanks} THEN {height} - (SELECT COUNT(*) FROM {o}) ELSE 0 END FROM {', '.join(tables)})", "num")
+                f"+ CASE WHEN {blanks} THEN {height} - (SELECT COUNT(*) FROM {o}) ELSE 0 END FROM {', '.join(tables)})", "num",
+                errs(*(crit.err for _, crit in pairs)))
 
 
 def _aggregate(c, target: Area, pairs, how: str) -> Expr:
@@ -139,9 +139,9 @@ def _aggregate(c, target: Area, pairs, how: str) -> Expr:
     crossed = " ".join(f"CROSS JOIN {t}" for t in tables)
     src = f"FROM {CELLS} s {crossed} {joins} WHERE {where_area(target, 's')} AND {cond}"
     numbers = "FILTER (WHERE s.kind = 'n')"
-    err = NO_ERR
+    err = errs(*(crit.err for _, crit in pairs))
     if keys.may_err:  # a matched error cell makes the result that error
-        err = f"(SELECT arg_min(s.txt, s.row_num) {src} AND s.kind = 'e')"  # the first; ORDER BY..LIMIT cannot run row-wise
+        err = errs(err, f"(SELECT arg_min(s.txt, s.row_num) {src} AND s.kind = 'e')")  # the first; ORDER BY..LIMIT cannot run row-wise
     if how == "SUM":
         return Expr(f"(SELECT COALESCE(SUM(s.num) {numbers}, CAST(0 AS DOUBLE)) {src})", "num", err)
     if how in ("MIN", "MAX"):
