@@ -207,7 +207,8 @@ cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each re
   other than plain sums (`=C1*1.05+B2`, `=MAX(C1,B2)`) also run cell by cell.
 - **The answer key:** a workbook must have been saved by Excel; `formulas` (the `compute` extra) is a weaker fallback
   and is known to disagree with Excel in places.
-- **dbt:** the generated project targets DuckDB (`dbt-duckdb`). Other warehouses are not generated yet.
+- **dbt:** the generated project targets DuckDB (`dbt-duckdb`), or Postgres (`dbt-postgres`) with `--target postgres`.
+  Other warehouses are not generated yet.
 
 ## Security and privacy
 
