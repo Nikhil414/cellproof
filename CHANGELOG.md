@@ -2,6 +2,7 @@
 
 ## 1.0.0 (unreleased)
 
+- Add DEC2BIN, DEC2HEX, DEC2OCT and their reverse conversions; unverified edge cases remain UNRESOLVED.
 - **Postgres target:** `cellproof convert book.xlsx --target postgres [--pg-url URL] [--dbt]`. Every cell is verified
   on DuckDB, then again on Postgres with the SQL translated (sqlglot, tree rewrites, and `pg_temp` helper functions with
   DuckDB's semantics). On the 85 public test workbooks Postgres gives the same verdicts as DuckDB: 11,080 PASS, the

@@ -26,7 +26,7 @@ unresolved cells were not guessed.
 
 - **11,080 cells PASS** on 85 public test workbooks (pycel, formulas, xlcalculator). The 16 FAILs are 10 cells in files LibreOffice saved and 6 last-digit NPV
   cancellations; none is a wrong translation.
-- **~140 Excel functions**, array formulas, dynamic spills (FILTER, SORT, UNIQUE), Excel tables, LET.
+- **146 Excel functions**, array formulas, dynamic spills (FILTER, SORT, UNIQUE), Excel tables, LET.
 - **Fast:** 200,000 formulas converted and verified in 26 s.
 - **Local:** workbook values never leave your machine.
 
@@ -130,11 +130,12 @@ reader -> regions -> dependency graph -> compiler -> verifier -> dbt emitter -> 
    code.
 6. **Emit** the dbt project and the report.
 
-140 Excel functions are supported: @ (SINGLE), ABS, AND, AVERAGE, AVERAGEIF(S), CEILING, CHAR, CHOOSE, CLEAN, CODE,
-COLUMN, COLUMNS, CONCAT(ENATE), COUNT, COUNTA, COUNTBLANK, COUNTIF(S), DATE, DATEDIF, DAY, DAYS, DAYS360, EDATE,
-EOMONTH, EXACT, EXP, FILTER, FIND, FLOOR, FV, HLOOKUP, IF, IFERROR, IFNA, IFS, INDEX, INT, IRR, IS* (BLANK, ERR,
+146 Excel functions are supported: @ (SINGLE), ABS, AND, AVERAGE, AVERAGEIF(S), BIN2DEC, CEILING, CHAR, CHOOSE, CLEAN, CODE,
+COLUMN, COLUMNS, CONCAT(ENATE), COUNT, COUNTA, COUNTBLANK, COUNTIF(S), DATE, DATEDIF, DAY, DAYS, DAYS360, DEC2BIN,
+DEC2HEX, DEC2OCT, EDATE,
+EOMONTH, EXACT, EXP, FILTER, FIND, FLOOR, FV, HEX2DEC, HLOOKUP, IF, IFERROR, IFNA, IFS, INDEX, INT, IRR, IS* (BLANK, ERR,
 ERROR, LOGICAL, NA, NUMBER, TEXT), ISEVEN, ISODD, LARGE, LEFT, LEN, LET, LN, LOG, LOG10, LOOKUP, LOWER, MATCH, MAX,
-MAXIFS, MEDIAN, MID, MIN, MINIFS, MOD, MODE, MONTH, MROUND, N, NA, NETWORKDAYS, NOT, NPER, NPV, OR, PERCENTILE(.INC),
+MAXIFS, MEDIAN, MID, MIN, MINIFS, MOD, MODE, MONTH, MROUND, N, NA, NETWORKDAYS, NOT, NPER, NPV, OCT2DEC, OR, PERCENTILE(.INC),
 PI, PMT, POWER, PRODUCT, PROPER, PV, QUARTILE(.INC), RANK(.EQ), RATE, REPLACE, REPT, RIGHT, ROUND(UP/DOWN), ROW, ROWS,
 SEARCH, SEQUENCE, SIGN, SMALL, SORT, SORTBY, SQRT, STDEV(.S/.P/P), SUBSTITUTE, SUBTOTAL, SUM, SUMIF(S), SUMPRODUCT,
 SWITCH, TEXT, TEXTJOIN, TRIM, TRUE/FALSE, TRUNC, UNICHAR, UNICODE, UNIQUE, UPPER, VALUE, VAR(.S/.P/P), VLOOKUP,

@@ -1,5 +1,6 @@
 """CONCATENATE, CONCAT, TEXTJOIN, LEFT, RIGHT, MID, LEN, TRIM, UPPER, LOWER, PROPER, SUBSTITUTE, REPLACE,
-FIND, SEARCH, REPT, VALUE, TEXT, EXACT, CHAR, CLEAN.
+FIND, SEARCH, REPT, VALUE, TEXT, EXACT, CHAR, CLEAN, CODE, UNICODE, UNICHAR, DEC2HEX, DEC2BIN, DEC2OCT,
+HEX2DEC, BIN2DEC, OCT2DEC.
 
 Numbers become text the way Excel writes them (expr.num_text: 15 significant digits). Positions are 1-based
 and counted in characters, as in Excel. TEXT supports the number formats in NUMBER_FORMATS; dates.py adds
@@ -305,3 +306,74 @@ def unichar(c, args, sheet):
     odd = f"(CASE WHEN {k} BETWEEN 55296 AND 57343 THEN '{UNCHECKED}' END)"
     return Expr(f"(CASE WHEN NOT ({bad}) AND {k} NOT BETWEEN 55296 AND 57343 THEN chr(CAST({k} AS INTEGER)) END)",
                 "txt", errs(n.err, _bad(bad), odd))
+
+
+def _dec2base(name: str, radix: int, min_val: int, max_val: int, offset: int):
+    def impl(c, args, sheet):
+        arity(name, args, 1, 2)
+        n = _n(c, args[0], sheet)
+        num_bad = f"(trunc({n.sql}) < {min_val} OR trunc({n.sql}) > {max_val})"
+        if len(args) == 2:
+            raw_p = c.expr(args[1], sheet) if args[1] is not None else BLANK
+            p = num(raw_p)
+            tp = f"TRY_CAST(trunc({p.sql}) AS INTEGER)"
+            safe_p = f"least(greatest(COALESCE({tp}, 0), 0), 10)"
+            p_bad = (f"({n.sql} >= 0 AND ({tp} IS NULL OR {tp} < 1 OR {tp} > 10 OR "
+                     f"length(to_base(CAST(greatest(0, trunc(least({n.sql}, {max_val}))) AS BIGINT), {radix})) > {tp}))")
+            odd = f"(CASE WHEN {n.sql} < 0 AND ({p.err} = '#VALUE!' OR {tp} IS NULL OR {tp} < 1 OR {tp} > 10) THEN '{UNCHECKED}' END)"
+            err = errs(n.err, raw_p.err, odd, p.err, f"(CASE WHEN {num_bad} OR {p_bad} THEN '#NUM!' END)")
+        else:
+            safe_p = "0"
+            p_bad = "FALSE"
+            err = errs(n.err, f"(CASE WHEN {num_bad} THEN '#NUM!' END)")
+        sql = (f"(CASE WHEN NOT ({num_bad} OR {p_bad}) THEN "
+               f"CASE WHEN {n.sql} < 0 THEN to_base(CAST(greatest(0, {offset} + trunc(least(greatest({n.sql}, {min_val}), 0))) AS BIGINT), {radix}, 10) "
+               f"ELSE to_base(CAST(greatest(0, trunc(least({n.sql}, {max_val}))) AS BIGINT), {radix}, {safe_p}) END END)")
+        return Expr(sql, "txt", err)
+    register(name)(impl)
+
+
+_dec2base("DEC2HEX", 16, -549755813888, 549755813887, 1099511627776)
+_dec2base("DEC2BIN", 2, -512, 511, 1024)
+_dec2base("DEC2OCT", 8, -536870912, 536870911, 1073741824)
+
+
+@register("HEX2DEC")
+def hex2dec(c, args, sheet):
+    arity("HEX2DEC", args, 1, 1)
+    t = _t(c, args[0], sheet)
+    bad = f"NOT regexp_matches({t.sql}, '^[0-9A-Fa-f]{{1,10}}$')"
+    sql = (f"(SELECT CASE WHEN NOT regexp_matches(st, '^[0-9A-Fa-f]{{1,10}}$') THEN NULL "
+           f"WHEN length(st) = 10 AND upper(substr(st, 1, 1)) IN ('8','9','A','B','C','D','E','F') "
+           f"THEN CAST(TRY_CAST('0x' || st AS BIGINT) - 1099511627776 AS DOUBLE) "
+           f"ELSE CAST(TRY_CAST('0x' || st AS BIGINT) AS DOUBLE) END "
+           f"FROM (SELECT {t.sql} AS st) hex_args)")
+    return Expr(sql, "num", errs(t.err, f"(CASE WHEN {t.sql} = '' THEN '{UNCHECKED}' WHEN {bad} THEN '#NUM!' END)"))
+
+
+@register("BIN2DEC")
+def bin2dec(c, args, sheet):
+    arity("BIN2DEC", args, 1, 1)
+    t = _t(c, args[0], sheet)
+    bad = f"NOT regexp_matches({t.sql}, '^[01]{{1,10}}$')"
+    sql = (f"(SELECT CASE WHEN NOT regexp_matches(st, '^[01]{{1,10}}$') THEN NULL "
+           f"WHEN length(st) = 10 AND substr(st, 1, 1) = '1' "
+           f"THEN CAST(TRY_CAST('0b' || st AS BIGINT) - 1024 AS DOUBLE) "
+           f"ELSE CAST(TRY_CAST('0b' || st AS BIGINT) AS DOUBLE) END "
+           f"FROM (SELECT {t.sql} AS st) bin_args)")
+    return Expr(sql, "num", errs(t.err, f"(CASE WHEN {t.sql} = '' THEN '{UNCHECKED}' WHEN {bad} THEN '#NUM!' END)"))
+
+
+@register("OCT2DEC")
+def oct2dec(c, args, sheet):
+    arity("OCT2DEC", args, 1, 1)
+    t = _t(c, args[0], sheet)
+    bad = f"NOT regexp_matches({t.sql}, '^[0-7]{{1,10}}$')"
+    terms = " + ".join(f"(TRY_CAST(substr(p, {i + 1}, 1) AS BIGINT) << {3 * (9 - i)})" for i in range(10))
+    sql = (f"(SELECT CASE WHEN NOT regexp_matches(st, '^[0-7]{{1,10}}$') THEN NULL "
+           f"WHEN length(st) = 10 AND substr(st, 1, 1) IN ('4','5','6','7') "
+           f"THEN CAST(val - 1073741824 AS DOUBLE) "
+           f"ELSE CAST(val AS DOUBLE) END "
+           f"FROM (SELECT st, {terms} AS val "
+           f"FROM (SELECT {t.sql} AS st, lpad({t.sql}, 10, '0') AS p) oct_inner) oct_outer)")
+    return Expr(sql, "num", errs(t.err, f"(CASE WHEN {t.sql} = '' THEN '{UNCHECKED}' WHEN {bad} THEN '#NUM!' END)"))
