@@ -464,6 +464,32 @@ def execute(book: Book, compiled: Compiled, con) -> tuple[dict[Key, tuple], dict
         con.execute("DROP TABLE IF EXISTS cells")
 
 
+MAX_ROUNDS = 20
+
+
+def verify_book(book: Book, compile_fn, con) -> tuple[Compiled, list[Verdict]]:
+    """(compiled, verdicts) on Postgres, where `compiled` holds only SQL Postgres ran: a batch that does not translate
+    or run makes its cells UNRESOLVED with the reason and the book is compiled again, so every cell reading them is
+    UNRESOLVED too (the DuckDB verifier's rule). The dbt project written from `compiled` then never reads a missing
+    value. Each round removes at least one batch."""
+    from cellproof.verifier import verdicts
+    for _ in range(MAX_ROUNDS):
+        compiled = compile_fn(book)
+        got, failed = execute(book, compiled, con)
+        if not failed:
+            return compiled, verdicts(book, compiled, got)
+        book.unread.update(failed)
+    raise RuntimeError(f"Postgres still refused SQL after {MAX_ROUNDS} rounds; please report it")
+
+
+def dbt_env(con, schema: str | None = None) -> dict[str, str]:
+    """The environment the generated dbt-postgres profile reads, pointing at `con`'s database."""
+    i = con.info
+    env = {"CELLPROOF_PG_HOST": i.host, "CELLPROOF_PG_PORT": str(i.port), "CELLPROOF_PG_USER": i.user,
+           "CELLPROOF_PG_PASSWORD": i.password or "", "CELLPROOF_PG_DBNAME": i.dbname}
+    return env | ({"CELLPROOF_PG_SCHEMA": schema} if schema else {})
+
+
 def verify(book: Book, compiled: Compiled, con) -> list[Verdict]:
     """Every formula cell DuckDB compiled, verified again on Postgres."""
     from cellproof.verifier import verdicts

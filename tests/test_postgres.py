@@ -1,5 +1,6 @@
 """The Postgres target (cellproof.postgres): every cell verified again on a real Postgres."""
 import json
+import os
 
 import pytest
 
@@ -16,7 +17,8 @@ from cellproof.compiler import compile_book  # noqa: E402
 
 @pytest.fixture(scope="module")
 def con():
-    with postgres.connect() as c:
+    # CI's Postgres service, else a Postgres of cellproof's own (pgserver)
+    with postgres.connect(os.environ.get("CELLPROOF_TEST_PG_URL")) as c:
         yield c
 
 
@@ -110,3 +112,87 @@ def test_boolean_index_and_error_spill_on_postgres(con, tmp_path):
     book = load(path)
     got = {v.key: (v.status, v.actual, v.reason) for v in postgres.verify(book, compile_book(book), con)}
     assert {s for s, _, _ in got.values()} == {"PASS"}, got
+
+
+# --- 1.0: the dbt project on Postgres ---------------------------------------------------------------------------
+
+# A workbook that needs the Postgres helpers (MOD -> cellproof_fmod, TEXT and & -> cellproof_printf), a region (one
+# formula pasted down), workbook text with braces (Jinja must not read them) and an error.
+DBT_BOOK = {"S": {
+    "A1": 10.0, "A2": 20.0, "A3": 30.0,
+    "B1": ("=A1*1.5", 15.0), "B2": ("=A2*1.5", 30.0), "B3": ("=A3*1.5", 45.0),
+    "C1": ("=MOD(A1,3)", 1.0), "C2": ('=TEXT(A2/3,"0.00")', "6.67"), "C3": ('="{"&A3&"}"', "{30}"),
+    "E1": ("=SUM(B1:B3)/0", "#DIV/0!"),
+}}
+
+
+def test_verify_book_drops_what_postgres_cannot_run_and_every_reader(con, monkeypatch):
+    book = book_of({"S": {"A1": 2.0, "B1": ("=A1*3", 6.0), "C1": ("=B1+1", 7.0), "D1": ("=A1+10", 12.0)}})
+    import cellproof.compiler as compiler
+    monkeypatch.setattr(compiler, "BATCH", 1)
+    real = postgres.translate
+    monkeypatch.setattr(postgres, "translate",
+                        lambda sql: real(sql).replace("3.0", "no_such_column") if "3.0" in sql else real(sql))
+    compiled, verdicts = postgres.verify_book(book, compile_book, con)
+    got = {v.key: v for v in verdicts}
+    assert got[("S", 1, 2)].status == "UNRESOLVED" and "Postgres refused" in got[("S", 1, 2)].reason
+    assert got[("S", 1, 3)].status == "UNRESOLVED"
+    assert got[("S", 1, 4)].status == "PASS"
+    in_batches = {s.key for b in compiled.batches for s in b}
+    assert ("S", 1, 2) not in in_batches and ("S", 1, 3) not in in_batches  # the dbt project holds only what ran
+
+
+def test_the_postgres_dbt_project(tmp_path):
+    from cellproof.emitter import write_project
+    book = book_of(DBT_BOOK)
+    write_project(book, compile_book(book), tmp_path, "book", target="postgres")
+    assert "type: postgres" in (tmp_path / "profiles.yml").read_text()
+    project = (tmp_path / "dbt_project.yml").read_text()
+    assert "cellproof_helpers()" in project and "double precision" in project
+    helpers = (tmp_path / "macros" / "cellproof_helpers.sql").read_text()
+    assert "pg_temp" not in helpers and "{{ target.schema }}.{% raw %}cellproof_fmod" in helpers
+    models = "\n".join(p.read_text() for p in (tmp_path / "models").rglob("*.sql"))
+    assert "pg_temp" not in models.lower() and "{{ target.schema }}.cellproof_fmod" in models.lower()
+    assert "{{ ref('input_cells') }}" in models and "'{{ '{' }}'" in models  # the formula's "{" stays text  # braces stay literal
+
+
+def _dbt_postgres():
+    import shutil
+    import subprocess
+    exe = shutil.which("dbt")
+    return exe is not None and "postgres" in subprocess.run([exe, "--version"], capture_output=True, text=True).stdout
+
+
+@pytest.mark.skipif(not _dbt_postgres(), reason="dbt-postgres not installed")
+def test_dbt_build_on_postgres_recomputes_the_workbook(con, tmp_path):
+    from cellproof.emitter import run_dbt, write_project
+    from cellproof.verifier import matches
+    book = book_of(DBT_BOOK)
+    compiled = compile_book(book)
+    write_project(book, compiled, tmp_path, "book", target="postgres")
+    ok, log = run_dbt(tmp_path, env=postgres.dbt_env(con, schema="cellproof_test"))
+    assert ok, log
+    rows = con.execute("SELECT sheet, row_num, col_num, kind, num, txt FROM cellproof_test.workbook_cells").fetchall()
+    got = {(s, r, c): (k, n, t) for s, r, c, k, n, t in rows}
+    assert set(got) == {s.key for s in compiled.steps}
+    for key, (k, n, t) in got.items():
+        assert matches(book.cells[key], k, n, t), (key, k, n, t)
+    con.execute("DROP SCHEMA cellproof_test CASCADE")
+
+
+@pytest.mark.skipif(not _dbt_postgres(), reason="dbt-postgres not installed")
+def test_cli_target_postgres_with_dbt(tmp_path, capsys):
+    wb = tmp_path / "b.xlsx"
+    write_xlsx(wb, DBT_BOOK)
+    assert main(["convert", str(wb), "--out", str(tmp_path / "out"), "--target", "postgres", "--dbt"]) == 0
+    printed = capsys.readouterr().out
+    assert "7 pass, 0 fail, 0 unresolved" in printed and "dbt build: ok" in printed
+    assert "type: postgres" in (tmp_path / "out" / "profiles.yml").read_text()
+
+
+def test_cli_postgres_url_that_does_not_connect(tmp_path, capsys):
+    wb = tmp_path / "b.xlsx"
+    write_xlsx(wb, {"S": {"A1": 2.0, "B1": ("=A1*3", 6.0)}})
+    assert main(["convert", str(wb), "--out", str(tmp_path / "out"), "--target", "postgres",
+                 "--pg-url", "postgresql://nobody@127.0.0.1:1/none?connect_timeout=2"]) == 2
+    assert "could not connect to Postgres" in capsys.readouterr().err

@@ -47,25 +47,37 @@ def main(argv: list[str] | None = None) -> int:
     for failure in failures:  # those cells are UNRESOLVED in the report; the run goes on
         print(f"error: {failure}", file=sys.stderr)
     out = args.out or args.workbook.with_name(args.workbook.stem + "_dbt")
+    dbt = None  # (ok, log) once dbt build ran
     if args.target == "postgres":
         try:
             from cellproof import postgres
-            with postgres.connect(args.pg_url) as con:
-                duck = sum(v.status == "PASS" for v in verdicts)
-                verdicts = postgres.verify(book, compiled, con)
+            from psycopg import OperationalError
         except ImportError:
             print("error: the Postgres target needs: pip install cellproof[postgres]", file=sys.stderr)
             return 2
-        compiled.findings.append(f"verified on Postgres: these verdicts are Postgres's ({duck} cells PASS on DuckDB)")
-    write_project(book, compiled, out, args.workbook.stem)
+        try:
+            with postgres.connect(args.pg_url) as con:
+                duck = sum(v.status == "PASS" for v in verdicts)
+                compiled, verdicts = postgres.verify_book(book, compile_fn, con)
+                compiled.findings.append(f"verified on Postgres: these verdicts are Postgres's ({duck} cells PASS on DuckDB)")
+                write_project(book, compiled, out, args.workbook.stem, target="postgres")
+                if args.dbt:  # while this Postgres runs: cellproof's own one stops when the block ends
+                    dbt = run_dbt(out, env=postgres.dbt_env(con))
+        except OperationalError as err:
+            print(f"error: could not connect to Postgres: {str(err).strip().splitlines()[0]}", file=sys.stderr)
+            return 2
+    else:
+        write_project(book, compiled, out, args.workbook.stem)
+        if args.dbt:
+            dbt = run_dbt(out)
     counts = write_report(verdicts, compiled.findings, out, args.workbook.name, computed, compiled.notes,
                           compiled.chains)
     if computed:
         print(f"{len(computed)} expected values computed by the formulas library (the file had none saved)")
     print(f"{counts['PASS']} pass, {counts['FAIL']} fail, {counts['UNRESOLVED']} unresolved -> {out / 'REPORT.md'}")
     code = 3 if failures else 1 if counts["FAIL"] else 0
-    if args.dbt:
-        ok, log = run_dbt(out)
+    if dbt is not None:
+        ok, log = dbt
         print("dbt build: ok" if ok else f"dbt build failed:\n{log}")
         code = code if ok else 1
     return code
