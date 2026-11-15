@@ -25,6 +25,17 @@ def _n(c, node, sheet: str) -> Expr:
     return num(c.expr(node, sheet) if node is not None else BLANK)
 
 
+def _t_strict(c, node, sheet: str) -> Expr:
+    """A text argument that real Excel refuses as TRUE/FALSE (the X2DEC family): #VALUE! (test.xlsx J7, J55)."""
+    raw = c.expr(node, sheet) if node is not None else BLANK
+    t = txt(raw)
+    if raw.type == "bool":
+        return Expr("CAST(NULL AS VARCHAR)", "txt", errs(t.err, "'#VALUE!'"))
+    if raw.type == "any":
+        return Expr(t.sql, "txt", errs(t.err, f"(CASE WHEN {raw.kind} = 'b' THEN '#VALUE!' END)"))
+    return t
+
+
 def _bad(cond: str) -> str:
     return f"(CASE WHEN {cond} THEN '#VALUE!' END)"
 
@@ -311,7 +322,8 @@ def unichar(c, args, sheet):
 def _dec2base(name: str, radix: int, min_val: int, max_val: int, offset: int):
     def impl(c, args, sheet):
         arity(name, args, 1, 2)
-        n = _n(c, args[0], sheet)
+        raw = c.expr(args[0], sheet) if args[0] is not None else BLANK
+        n = num_strict(raw)   # real Excel: TRUE/FALSE as the number is #VALUE! (test.xlsx J7, J17:J19, J27, J55)
         num_bad = f"(trunc({n.sql}) < {min_val} OR trunc({n.sql}) > {max_val})"
         if len(args) == 2:
             raw_p = c.expr(args[1], sheet) if args[1] is not None else BLANK
@@ -320,8 +332,14 @@ def _dec2base(name: str, radix: int, min_val: int, max_val: int, offset: int):
             safe_p = f"least(greatest(COALESCE({tp}, 0), 0), 10)"
             p_bad = (f"({n.sql} >= 0 AND ({tp} IS NULL OR {tp} < 1 OR {tp} > 10 OR "
                      f"length(to_base(CAST(greatest(0, trunc(least({n.sql}, {max_val}))) AS BIGINT), {radix})) > {tp}))")
+            # the number is text that is not a number: only for a text argument is n.sql NULL while the value stays
+            txt_raw = (raw.sql if raw.type == "txt" else
+                       f"(CASE WHEN {raw.kind} = 's' THEN {raw.txt} END)" if raw.type == "any" else "CAST(NULL AS VARCHAR)")
+            # real Excel checks places first: DEC2BIN("E", 0) is #NUM!, not the text's #VALUE! (BASES.xlsx places!G38:G49)
+            p_bad_text = f"(COALESCE({tp} < 1 OR {tp} > 10, FALSE) AND {txt_raw} IS NOT NULL AND {n.sql} IS NULL)"
             odd = f"(CASE WHEN {n.sql} < 0 AND ({p.err} = '#VALUE!' OR {tp} IS NULL OR {tp} < 1 OR {tp} > 10) THEN '{UNCHECKED}' END)"
-            err = errs(n.err, raw_p.err, odd, p.err, f"(CASE WHEN {num_bad} OR {p_bad} THEN '#NUM!' END)")
+            err = errs(f"(CASE WHEN {p_bad_text} THEN '#NUM!' END)", n.err, raw_p.err, odd, p.err,
+                       f"(CASE WHEN {num_bad} OR {p_bad} THEN '#NUM!' END)")
         else:
             safe_p = "0"
             p_bad = "FALSE"
@@ -341,7 +359,7 @@ _dec2base("DEC2OCT", 8, -536870912, 536870911, 1073741824)
 @register("HEX2DEC")
 def hex2dec(c, args, sheet):
     arity("HEX2DEC", args, 1, 1)
-    t = _t(c, args[0], sheet)
+    t = _t_strict(c, args[0], sheet)
     bad = f"NOT regexp_matches({t.sql}, '^[0-9A-Fa-f]{{1,10}}$')"
     sql = (f"(SELECT CASE WHEN NOT regexp_matches(st, '^[0-9A-Fa-f]{{1,10}}$') THEN NULL "
            f"WHEN length(st) = 10 AND upper(substr(st, 1, 1)) IN ('8','9','A','B','C','D','E','F') "
@@ -354,7 +372,7 @@ def hex2dec(c, args, sheet):
 @register("BIN2DEC")
 def bin2dec(c, args, sheet):
     arity("BIN2DEC", args, 1, 1)
-    t = _t(c, args[0], sheet)
+    t = _t_strict(c, args[0], sheet)
     bad = f"NOT regexp_matches({t.sql}, '^[01]{{1,10}}$')"
     sql = (f"(SELECT CASE WHEN NOT regexp_matches(st, '^[01]{{1,10}}$') THEN NULL "
            f"WHEN length(st) = 10 AND substr(st, 1, 1) = '1' "
@@ -367,7 +385,7 @@ def bin2dec(c, args, sheet):
 @register("OCT2DEC")
 def oct2dec(c, args, sheet):
     arity("OCT2DEC", args, 1, 1)
-    t = _t(c, args[0], sheet)
+    t = _t_strict(c, args[0], sheet)
     bad = f"NOT regexp_matches({t.sql}, '^[0-7]{{1,10}}$')"
     terms = " + ".join(f"(TRY_CAST(substr(p, {i + 1}, 1) AS BIGINT) << {3 * (9 - i)})" for i in range(10))
     sql = (f"(SELECT CASE WHEN NOT regexp_matches(st, '^[0-7]{{1,10}}$') THEN NULL "

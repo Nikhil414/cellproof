@@ -43,6 +43,13 @@ CASES = [  # formula, Excel's answer (Microsoft's function reference)
     ('=DEC2HEX(-1,0)', "#UNCHECKED"), ('=DEC2BIN(-1,11)', "#UNCHECKED"), ('=DEC2OCT(-1,"x")', "#UNCHECKED"),
     ('=HEX2DEC(" A5")', "#NUM!"), ('=HEX2DEC("+A5")', "#NUM!"),
     ('=HEX2DEC(S!Z1)', "#UNCHECKED"), ('=DEC2HEX(-1,1/0)', "#DIV/0!"),
+    # A bad places fires #NUM! even when the number itself is text (BASES.xlsx places!G38:G49, Excel-saved):
+    ('=DEC2BIN("E", 0)', "#NUM!"), ('=DEC2OCT("E", 0)', "#NUM!"), ('=DEC2HEX("E", 0)', "#NUM!"),
+    ('=DEC2BIN("E", 11)', "#NUM!"), ('=DEC2OCT("E", 11)', "#NUM!"), ('=DEC2HEX("E", 11)', "#NUM!"),
+    # TRUE/FALSE is #VALUE! as the number (test.xlsx J7, J17:J19, J27, J55, Excel-saved):
+    ('=DEC2BIN(TRUE)', "#VALUE!"), ('=DEC2HEX(TRUE)', "#VALUE!"), ('=DEC2OCT(TRUE)', "#VALUE!"),
+    ('=BIN2DEC(TRUE)', "#VALUE!"), ('=HEX2DEC(TRUE)', "#VALUE!"), ('=OCT2DEC(TRUE)', "#VALUE!"),
+    ('=DEC2BIN(S!B3)', "#VALUE!"), ('=DEC2HEX(S!B3)', "#VALUE!"), ('=BIN2DEC(S!B3)', "#VALUE!"),
 ]
 
 
@@ -108,4 +115,30 @@ def test_base_conversions_with_cell_references_and_truncation():
     assert got[("S", 5, 2)] == ("n", 58.0, None)
     assert got[("S", 6, 2)] == ("s", None, "1001")
     assert got[("S", 7, 2)] == ("s", None, "072")
+
+
+def test_base_functions_of_a_range_in_a_cse_block():
+    # Real Excel saved test.xlsx (an ATP-era build): {=HEX2DEC(C27:J27)} is #VALUE! in every cell of the block -
+    # the function does not broadcast over a range there. DEC2* of a range was never checked in real Excel, so it
+    # stays honest instead of broadcasting like modern Excel would.
+    from cellproof.reader import load
+    from xlsxkit import write_xlsx
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as tmp:
+        wb = Path(tmp) / "b.xlsx"
+        write_xlsx(wb, {"S": {"C1": 0, "D1": 9999999999, "E1": 2.3, "F1": 11111111111,
+                              "G1": -1, "H1": "f000000000", "I1": True,          # J1 is left empty, as in test.xlsx
+                              "A3": ("{=HEX2DEC(C1:J1)}", "#VALUE!", "A3:H3"),
+                              "B3": "#VALUE!", "C3": "#VALUE!", "D3": "#VALUE!", "E3": "#VALUE!",
+                              "F3": "#VALUE!", "G3": "#VALUE!", "H3": "#VALUE!",
+                              "J3": ("{=DEC2HEX(C1:J1, 4)}", "#VALUE!", "J3:Q3"),  # saved value is a placeholder: the real
+                                                                                  # Excel answer was never recorded, the
+                                                                                  # cell is UNRESOLVED either way,
+                              "K3": "", "L3": "", "M3": "", "N3": "", "O3": "", "P3": "", "Q3": ""}})
+        book = load(wb)
+        compiled = compile_book(book)
+        got = execute(book, compiled)
+        assert [got[("S", 3, c)] for c in range(1, 9)] == [("e", None, "#VALUE!")] * 8
+        assert "DEC2HEX of a range in an array formula not supported yet" in compiled.unresolved[("S", 3, 10)]
 
