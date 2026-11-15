@@ -1,6 +1,6 @@
 # cellproof: progress
 
-Last updated: 2026-11-15. This file is the single place that says where the project stands. Read it cold: a person
+Last updated: 2026-11-16. This file is the single place that says where the project stands. Read it cold: a person
 or a coding agent should be able to pick up the work from here. For the rules of the code read `AGENTS.md`; for what
 the tool does and its limits, `README.md`.
 
@@ -20,10 +20,10 @@ bug. Output: `REPORT.md` / `report.json` and a dbt project that runs exactly the
 | `main` | 0.6.1 plus: the Postgres target (verification only), the browser playground, README with demo GIF. Not released |
 | Branch `v1.0-postgres`, [PR #8](https://github.com/Nikhil414/cellproof/pull/8) | **1.0**: dbt-postgres project, `postgres.verify_book`, `--target postgres --dbt`, Postgres 16 job in CI. CI green (13/13). Merge and release planned for after launch week (~2026-11-24) |
 | Playground | Live at https://nikhil414.github.io/cellproof/ (GitHub Pages, deployed by `.github/workflows/pages.yml` on every push to `main` that touches `src/`, `playground/` or the example) |
-| Tests | `v1.0-postgres`: 549 pass, 3 skip (with dbt-postgres installed; verified locally 2026-11-15). `main` carries PR #7's DEC2* tests and PR #9's `--stats` tests on top of 547 pass / 3 skip |
+| Tests | `v1.0-postgres`: 549 pass, 3 skip (with dbt-postgres installed; verified locally 2026-11-15). `main`: **550 pass, 3 skip** (2026-11-16, after the base cross-pairs; the 200k-formula benchmark is opt-in via `CELLPROOF_PERF=1`) |
 | CI | `tests` workflow: Windows/macOS/Linux x Python 3.10-3.13, plus (on the 1.0 branch) a `postgres` job. All green (the one cancelled macOS job on `main` after PR #7 was rerun 2026-11-15; PR #9's run green 2026-11-15) |
 | Public test workbooks (85) | **11,080 PASS / 16 FAIL / 37,814 UNRESOLVED**, identical on DuckDB 2.0, on DuckDB 1.2 (the playground) and on Postgres (with `dbt build` passing for all 85). The 16 FAIL are explained below. A fresh re-download of the corpus on 2026-11-15 (the source repos changed; 66 files now) measured **13,043 PASS / 34 FAIL / 19,183 UNRESOLVED** — one workbook (formulas' `test.xlsx`, a function catalog) holds 17,454 of the UNRESOLVED, and `CONVERT` alone 3,593 (19%). Of the 34 FAIL, 19 were wrong error codes from PR #7's base conversions ([issue #10](https://github.com/Nikhil414/cellproof/issues/10)), 9 are the known LibreOffice drift in `INFORMATION.xlsx`/`SQRT.xlsx`; 6 are the known npv float cells; the 19 error codes were fixed the same day (PR #12), bringing the fresh-corpus count to **13,062 PASS / 15 FAIL**. 2026-11-15: the six base cross-pairs (HEX2BIN/HEX2OCT/BIN2HEX/BIN2OCT/OCT2HEX/OCT2BIN, semantics verified against Excel-saved values in `test.xlsx`) turned **669** more cells PASS: fresh corpus now **13,732 PASS / 15 FAIL / 18,513 UNRESOLVED**, 0 FAILs on `BASES.xlsx` and `test.xlsx` |
-| Contributors | Open: PR #5 (overflow, changes requested). Merged: PR #7 (DEC2BIN/HEX/OCT and back, MilindLate, 2026-11-13, closes #2; unverified cases guarded, never guessed), PR #9 (`--stats` flag: count-sorted tally of UNRESOLVED reasons on the console, 2026-11-15), PR #12 (base conversions: match real Excel's error codes, closes #10, 2026-11-15). Closed: PR #6 (superseded by #5). Issues #1, #3, #4 open, #4 pinned; #3 has a contributor spec comment (2026-11-15: TAKE, DROP, CHOOSECOLS, CHOOSEROWS, TOCOL, TOROW against the `fn/dynamic.py` relation model); #10 (19 wrong-error-code corpus FAILs introduced by PR #7's base conversions) was fixed in PR #12 and closed 2026-11-15. 2026-11-15: the six base cross-pairs landed from issue #14's roadmap (first item); next is TTEST (384 corpus cells) |
+| Contributors | Open: PR #5 (overflow, changes requested). Merged: PR #7 (DEC2BIN/HEX/OCT and back, MilindLate, 2026-11-13, closes #2; unverified cases guarded, never guessed), PR #9 (`--stats` flag: count-sorted tally of UNRESOLVED reasons on the console, 2026-11-15), PR #12 (base conversions: match real Excel's error codes, closes #10, 2026-11-15), PR #15 (the six base cross-pairs, 2026-11-16, issue #14's first roadmap item). Closed: PR #6 (superseded by #5). Issues #1, #3, #4, #14 open, #4 pinned; #3 has a contributor spec comment (2026-11-15: TAKE, DROP, CHOOSECOLS, CHOOSEROWS, TOCOL, TOROW against the `fn/dynamic.py` relation model); #10 was fixed in PR #12 and closed 2026-11-15; #14 is the 2.0 roadmap (ranked UNRESOLVED table) |
 | Launch | Public launch (Show HN, r/dataengineering, LinkedIn, Shorts/Reels) planned for Tuesday 2026-11-10. 1.0 is the second announcement |
 
 ## Where things live
@@ -189,9 +189,21 @@ From Excel-saved files (`tests/test_excel_findings.py`, `tests/test_corpus_findi
 1. Launch (2026-11-10), then answer feedback fast: every "does it handle X?" becomes an issue.
 2. Finish PR #5 (overflow as #NUM!) and merge it.
 3. Release 1.0 (PR #8) as the second announcement.
-4. TAKE/DROP/CHOOSECOLS/CHOOSEROWS/TOCOL/TOROW (issue #3).
-5. More real analyst workbooks: each one found gaps the public files did not.
-6. Speed: read time (openpyxl twice) and the per-cell dependency loop.
-7. Other warehouses through the same translation path as Postgres (ask launch users which one).
-8. Plan 3: an AI retry loop for failed cells (it sees formula structure only, never values), every answer still
+4. **2.0 roadmap (issue #14), in order.** The cross-pairs landed first (PR #15). Next:
+   - **TTEST / T.TEST** — 384 UNRESOLVED cells (192 each), per the corpus tally. A survey on 2026-11-16 found
+     **every** TTEST formula in the corpus sits inside an **array (CSE) block**: `test.xlsx` holds 17
+     `<f t="array">` blocks such as `TTEST(C37:D38,E35:E38,{1;2;1;2;1;2},{1;2;3;1;2;3})`, each spilling 6 rows
+     (R38:R43 and neighbours), and there are no scalar TTEST formulas anywhere. So this is not just a new function:
+     the ranges-in-a-CSE-block behaviour has to be settled (Excel's saved values are the ground truth) before the
+     384 cells can be claimed, and part of the work is the lift/NO_LIFT decision that the cross-pairs deliberately
+     left UNRESOLVED.
+   - Approximate-match evidence hunt (~617 cells): find real-Excel saved answers for the lookup modes currently
+     left UNRESOLVED, then implement only what is proven.
+   - `CONVERT` (3,593 cells) stays the contributor-bait item (the largest single reason in the corpus).
+   - `CHAR` > 127 from a Mac-calculated file stays honest UNRESOLVED.
+5. TAKE/DROP/CHOOSECOLS/CHOOSEROWS/TOCOL/TOROW (issue #3).
+6. More real analyst workbooks: each one found gaps the public files did not.
+7. Speed: read time (openpyxl twice) and the per-cell dependency loop.
+8. Other warehouses through the same translation path as Postgres (ask launch users which one).
+9. Plan 3: an AI retry loop for failed cells (it sees formula structure only, never values), every answer still
    verified against Excel.
