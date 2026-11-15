@@ -50,6 +50,29 @@ CASES = [  # formula, Excel's answer (Microsoft's function reference)
     ('=DEC2BIN(TRUE)', "#VALUE!"), ('=DEC2HEX(TRUE)', "#VALUE!"), ('=DEC2OCT(TRUE)', "#VALUE!"),
     ('=BIN2DEC(TRUE)', "#VALUE!"), ('=HEX2DEC(TRUE)', "#VALUE!"), ('=OCT2DEC(TRUE)', "#VALUE!"),
     ('=DEC2BIN(S!B3)', "#VALUE!"), ('=DEC2HEX(S!B3)', "#VALUE!"), ('=BIN2DEC(S!B3)', "#VALUE!"),
+    # The cross-pairs (test.xlsx ENGINEERING!R26:AF26 etc., Excel-saved): the X2DEC parse feeds the DEC2* format,
+    # and the target base's own two's-complement range still gates it (HEX2BIN("400") is #NUM! at 1024 > 511):
+    ('=HEX2BIN("B")', "1011"), ('=HEX2BIN("E", 4)', "1110"), ('=HEX2BIN("0")', "0"), ('=HEX2BIN(11)', "10001"),
+    ('=HEX2BIN(2.3)', "#NUM!"), ('=HEX2BIN(-1)', "#NUM!"), ('=HEX2BIN("400")', "#NUM!"),
+    ('=HEX2BIN("FFFFFFFFFF")', "1111111111"), ('=HEX2BIN("FFFFFFFFFE")', "1111111110"),
+    ('=HEX2BIN("FFFFFFFFFF", 3)', "1111111111"), ('=HEX2BIN(9999999999)', "#NUM!"),
+    ('=HEX2BIN("11111111111")', "#NUM!"), ('=HEX2BIN("GGG")', "#NUM!"), ('=HEX2BIN("B", 1)', "#NUM!"),
+    ('=HEX2OCT("F", 3)', "017"), ('=HEX2OCT("FFFFFFFFFE")', "7777777776"), ('=HEX2OCT("FFFFFFFFFF")', "7777777777"),
+    ('=HEX2OCT("2000000000")', "#NUM!"), ('=HEX2OCT(9999999999)', "#NUM!"),
+    ('=BIN2HEX("111111111")', "1FF"), ('=BIN2HEX("1000000000")', "FFFFFFFE00"), ('=BIN2HEX(111111111)', "1FF"),
+    ('=BIN2HEX(0, 0)', "#NUM!"), ('=BIN2HEX(2.3)', "#NUM!"), ('=BIN2HEX("FFFFFFFFFE")', "#NUM!"),
+    ('=BIN2HEX("11111111111")', "#NUM!"),
+    ('=BIN2OCT("111111111")', "777"), ('=BIN2OCT("1000000000")', "7777777000"), ('=BIN2OCT("11", 3)', "003"),
+    ('=BIN2OCT("2")', "#NUM!"),
+    ('=OCT2HEX("7777777777")', "FFFFFFFFFF"), ('=OCT2HEX("54")', "2C"), ('=OCT2HEX(54)', "2C"),
+    ('=OCT2HEX("4000000000")', "FFE0000000"), ('=OCT2HEX("77777777770")', "#NUM!"), ('=OCT2HEX("a")', "#NUM!"),
+    ('=OCT2BIN("7777777777")', "1111111111"), ('=OCT2BIN("777")', "111111111"), ('=OCT2BIN("1001")', "#NUM!"),
+    ('=OCT2BIN("a")', "#NUM!"), ('=OCT2BIN("7", 6)', "000111"),
+    # TRUE is #VALUE! in the cross-pairs too (test.xlsx J26:J28, J8:J9, J54:J56, Excel-saved):
+    ('=HEX2BIN(TRUE)', "#VALUE!"), ('=BIN2HEX(S!B3)', "#VALUE!"),
+    ('=HEX2BIN(1/0)', "#DIV/0!"), ('=HEX2BIN(" 1")', "#NUM!"),
+    # an empty text stays UNCHECKED, as in the X2DEC family (never verified in real Excel):
+    ('=HEX2BIN("")', "#UNCHECKED"),
 ]
 
 
@@ -141,4 +164,35 @@ def test_base_functions_of_a_range_in_a_cse_block():
         got = execute(book, compiled)
         assert [got[("S", 3, c)] for c in range(1, 9)] == [("e", None, "#VALUE!")] * 8
         assert "DEC2HEX of a range in an array formula not supported yet" in compiled.unresolved[("S", 3, 10)]
+
+
+def test_base_cross_pairs_of_a_blank_cell():
+    # Real Excel saved test.xlsx (H26, H28, H54, H56): HEX2BIN of a blank cell is HEX2BIN(0) -> '0', and the
+    # places check still gates it (W8, W9: BIN2HEX of a blank cell with places 0 is #NUM!).
+    book = book_of({"S": {"A1": None, "B1": ("=HEX2BIN(A1)", "0"), "B2": ("=OCT2HEX(A1)", "0"),
+                          "B3": ("=BIN2HEX(A1, 0)", "#NUM!"), "B4": ("=HEX2BIN(A1, 4)", "0000")}})
+    compiled = compile_book(book)
+    got = execute(book, compiled)
+    assert compiled.unresolved == {}
+    assert got[("S", 1, 2)] == ("s", None, "0") and got[("S", 2, 2)] == ("s", None, "0")
+    assert got[("S", 3, 2)] == ("e", None, "#NUM!") and got[("S", 4, 2)] == ("s", None, "0000")
+
+
+def test_base_cross_pairs_of_a_range_in_a_cse_block():
+    # Real Excel refused a range in a CSE block with #VALUE! for the X2DEC family (test.xlsx, proven in PR #12) -
+    # but no real-Excel answer was ever recorded for the cross-pairs, so they stay honest UNRESOLVED instead of
+    # claiming either the #VALUE! or modern Excel's broadcast.
+    from cellproof.reader import load
+    from xlsxkit import write_xlsx
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as tmp:
+        wb = Path(tmp) / "b.xlsx"
+        write_xlsx(wb, {"S": {"C1": "F", "D1": "7", "E1": "1001",                      # J1 left empty, as in test.xlsx
+                              "A3": ("{=HEX2BIN(C1:J1)}", "x", "A3:H3"),              # saved value is a placeholder
+                              "B3": "", "C3": "", "D3": "", "E3": "", "F3": "", "G3": "", "H3": ""}})
+        book = load(wb)
+        compiled = compile_book(book)
+        assert "HEX2BIN of a range in an array formula not supported yet" in compiled.unresolved[("S", 3, 1)]
+
 

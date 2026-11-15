@@ -107,7 +107,8 @@ class Keys:
 
 # Analysis ToolPak functions do not take an array where one value is expected: {arguments that are one value}
 NO_LIFT = {"EDATE": 2, "EOMONTH": 2, "MROUND": 2, "YEARFRAC": 3, "NETWORKDAYS": 2, "WORKDAY": 2, "ISEVEN": 1,
-           "ISODD": 1, "HEX2DEC": 1, "BIN2DEC": 1, "OCT2DEC": 1, "DEC2HEX": 2, "DEC2BIN": 2, "DEC2OCT": 2}
+           "ISODD": 1, "HEX2DEC": 1, "BIN2DEC": 1, "OCT2DEC": 1, "DEC2HEX": 2, "DEC2BIN": 2, "DEC2OCT": 2,
+           "HEX2BIN": 2, "HEX2OCT": 2, "BIN2HEX": 2, "BIN2OCT": 2, "OCT2HEX": 2, "OCT2BIN": 2}
 NO_LIFT_CHECKED = {"EDATE", "EOMONTH", "MROUND", "YEARFRAC", "ISEVEN", "ISODD",
                    "HEX2DEC", "BIN2DEC", "OCT2DEC"}  # #VALUE!: formulas' test.xlsx
 
