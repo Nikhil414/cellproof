@@ -39,6 +39,30 @@ def test_unreadable_file_exits_2(tmp_path, capsys):
     assert "save the workbook as .xlsx" in capsys.readouterr().err
 
 
+def test_stats_tallies_unresolved_reasons(tmp_path, capsys):
+    wb = tmp_path / "b.xlsx"
+    write_xlsx(wb, {"S": {"A1": 1, "A2": ("=TODAY()", 2), "A3": ("=BESSELJ(1,1)", 0), "A4": ("=BESSELJ(2,2)", 0)}})
+    assert main(["convert", str(wb), "--out", str(tmp_path / "out"), "--stats"]) == 0
+    out = capsys.readouterr().out
+    assert "Unresolved by reason" in out
+    # most common reason first, then count-sorted
+    assert out.index("2  function BESSELJ not supported yet") < out.index("1  volatile function TODAY")
+
+
+def test_stats_says_when_everything_resolved(tmp_path, capsys):
+    wb = tmp_path / "b.xlsx"
+    write_xlsx(wb, {"S": {"A1": 2, "A2": ("=A1*2", 4)}})
+    assert main(["convert", str(wb), "--out", str(tmp_path / "out"), "--stats"]) == 0
+    assert "no unresolved cells" in capsys.readouterr().out
+
+
+def test_stats_off_by_default_keeps_output_unchanged(tmp_path, capsys):
+    wb = tmp_path / "b.xlsx"
+    write_xlsx(wb, {"S": {"A1": 1, "A2": ("=TODAY()", 2)}})
+    assert main(["convert", str(wb), "--out", str(tmp_path / "out")]) == 0
+    assert "Unresolved by reason" not in capsys.readouterr().out
+
+
 def test_console_that_cannot_print_unicode(tmp_path, monkeypatch):
     wb = tmp_path / "Ümsatz✓.xlsx"
     write_xlsx(wb, {"S": {"A1": 1, "A2": ("=A1+1", 2)}})

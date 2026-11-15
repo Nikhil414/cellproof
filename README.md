@@ -76,6 +76,7 @@ Runtime dependencies are only `openpyxl` and `duckdb`.
 cellproof convert book.xlsx                 # writes book_dbt/ next to the file
 cellproof convert book.xlsx --out out_dir   # choose the folder
 cellproof convert book.xlsx --dbt           # also run `dbt build` on the generated project
+cellproof convert book.xlsx --stats         # print the unresolved cells' reasons, most common first
 ```
 
 The output folder holds:

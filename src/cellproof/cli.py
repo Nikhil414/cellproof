@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
 from pathlib import Path
 
 from cellproof.compiler import NO_VALUE, compile_book
@@ -26,6 +27,8 @@ def main(argv: list[str] | None = None) -> int:
     convert.add_argument("--target", choices=["duckdb", "postgres"], default="duckdb",
                          help="verify on DuckDB (default) or also on Postgres (needs: pip install cellproof[postgres])")
     convert.add_argument("--pg-url", help="the Postgres to verify on (default: a Postgres of cellproof's own)")
+    convert.add_argument("--stats", action="store_true",
+                         help="print a tally of the unresolved cells' reasons, most common first")
     args = parser.parse_args(argv)
 
     try:
@@ -63,6 +66,14 @@ def main(argv: list[str] | None = None) -> int:
     if computed:
         print(f"{len(computed)} expected values computed by the formulas library (the file had none saved)")
     print(f"{counts['PASS']} pass, {counts['FAIL']} fail, {counts['UNRESOLVED']} unresolved -> {out / 'REPORT.md'}")
+    if args.stats:
+        reasons = Counter(v.reason for v in verdicts if v.status == "UNRESOLVED")
+        if reasons:
+            print("Unresolved by reason (top 15):")
+            for reason, n in reasons.most_common(15):
+                print(f"  {n}  {reason}")
+        else:
+            print("no unresolved cells")
     code = 3 if failures else 1 if counts["FAIL"] else 0
     if args.dbt:
         ok, log = run_dbt(out)
