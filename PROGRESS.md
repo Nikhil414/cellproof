@@ -1,6 +1,6 @@
 # cellproof: progress
 
-Last updated: 2026-11-07. This file is the single place that says where the project stands. Read it cold: a person
+Last updated: 2026-11-15. This file is the single place that says where the project stands. Read it cold: a person
 or a coding agent should be able to pick up the work from here. For the rules of the code read `AGENTS.md`; for what
 the tool does and its limits, `README.md`.
 
@@ -20,10 +20,10 @@ bug. Output: `REPORT.md` / `report.json` and a dbt project that runs exactly the
 | `main` | 0.6.1 plus: the Postgres target (verification only), the browser playground, README with demo GIF. Not released |
 | Branch `v1.0-postgres`, [PR #8](https://github.com/Nikhil414/cellproof/pull/8) | **1.0**: dbt-postgres project, `postgres.verify_book`, `--target postgres --dbt`, Postgres 16 job in CI. CI green (13/13). Merge and release planned for after launch week (~2026-11-24) |
 | Playground | Live at https://nikhil414.github.io/cellproof/ (GitHub Pages, deployed by `.github/workflows/pages.yml` on every push to `main` that touches `src/`, `playground/` or the example) |
-| Tests | `main`: 537 pass, 9 skip. `v1.0-postgres`: 548 pass, 3 skip (with dbt-postgres installed) |
-| CI | `tests` workflow: Windows/macOS/Linux x Python 3.10-3.13, plus (on the 1.0 branch) a `postgres` job. All green |
-| Public test workbooks (85) | **11,080 PASS / 16 FAIL / 37,814 UNRESOLVED**, identical on DuckDB 2.0, on DuckDB 1.2 (the playground) and on Postgres (with `dbt build` passing for all 85). The 16 FAIL are explained below |
-| Contributors | Open: PR #5 (overflow, changes requested), PR #7 (DEC2HEX etc., changes requested). Closed: PR #6 (superseded by #5). Issues #1-#4 open, #4 pinned |
+| Tests | `v1.0-postgres`: 549 pass, 3 skip (with dbt-postgres installed; verified locally 2026-11-15). `main` carries PR #7's DEC2* tests and PR #9's `--stats` tests on top of 547 pass / 3 skip |
+| CI | `tests` workflow: Windows/macOS/Linux x Python 3.10-3.13, plus (on the 1.0 branch) a `postgres` job. All green (the one cancelled macOS job on `main` after PR #7 was rerun 2026-11-15; PR #9's run green 2026-11-15) |
+| Public test workbooks (85) | **11,080 PASS / 16 FAIL / 37,814 UNRESOLVED**, identical on DuckDB 2.0, on DuckDB 1.2 (the playground) and on Postgres (with `dbt build` passing for all 85). The 16 FAIL are explained below. A fresh re-download of the corpus on 2026-11-15 (the source repos changed; 66 files now) measured **13,043 PASS / 34 FAIL / 19,183 UNRESOLVED** — one workbook (formulas' `test.xlsx`, a function catalog) holds 17,454 of the UNRESOLVED, and `CONVERT` alone 3,593 (19%). 28 of the 34 FAIL are new or newly-visible: 19 are wrong error codes from PR #7's base conversions ([issue #10](https://github.com/Nikhil414/cellproof/issues/10)), 9 are the known LibreOffice drift in `INFORMATION.xlsx`/`SQRT.xlsx`; 6 are the known npv float cells |
+| Contributors | Open: PR #5 (overflow, changes requested). Merged: PR #7 (DEC2BIN/HEX/OCT and back, MilindLate, 2026-11-13, closes #2; unverified cases guarded, never guessed), PR #9 (`--stats` flag: count-sorted tally of UNRESOLVED reasons on the console, 2026-11-15). Closed: PR #6 (superseded by #5). Issues #1, #3, #4, #10 open, #4 pinned; #3 has a contributor spec comment (2026-11-15: TAKE, DROP, CHOOSECOLS, CHOOSEROWS, TOCOL, TOROW against the `fn/dynamic.py` relation model); #10 is the 19 wrong-error-code corpus FAILs introduced by PR #7's base conversions |
 | Launch | Public launch (Show HN, r/dataengineering, LinkedIn, Shorts/Reels) planned for Tuesday 2026-11-10. 1.0 is the second announcement |
 
 ## Where things live
@@ -91,6 +91,7 @@ Everything was built test-first; each piece was reviewed by a fresh reviewer.
 | Postgres verification (`main`) | `--target postgres [--pg-url]`: every verified DuckDB batch is translated and every cell verified again on Postgres (bundled `pgserver` or your own). Untranslatable batches and their readers are UNRESOLVED ("not yet on Postgres: ..."). Nothing stays in the database: temp table, helpers in `pg_temp` |
 | Browser playground (`main`) | drop a workbook, get every verdict, "Where to start", the cell table, REPORT.md and the dbt project as a zip; Pyodide 0.27 + DuckDB 1.2 in a Web Worker; nothing uploaded |
 | 1.0 (`v1.0-postgres`, PR #8) | `postgres.verify_book` recompiles without what Postgres cannot run, so the dbt-postgres project only holds SQL that ran; helpers created in the target schema by an `on-run-start` macro; `profiles.yml` reads `CELLPROOF_PG_*`; `--dbt` builds on the Postgres that verified; CI Postgres 16 job |
+| PR #7 (merged 2026-11-13) | DEC2BIN, DEC2HEX, DEC2OCT and BIN2DEC, HEX2DEC, OCT2DEC (issue #2); hex text cast to BIGINT so DuckDB 1.2 works; cases not checked in real Excel (`HEX2DEC("")`, a negative invalid `places`) stay UNRESOLVED, never guessed |
 
 ## The public test workbooks
 
@@ -164,11 +165,11 @@ From Excel-saved files (`tests/test_excel_findings.py`, `tests/test_corpus_findi
   cells and arrays agree; CI green). Changes requested: drop the COUNTIF/SUMIF error-criterion change (Excel likely
   counts cells holding the error; unconfirmed, so it must stay UNRESOLVED), and measure SQL size (the check repeats
   the expression per level) and the 200k benchmark.
-- **PR #7 (DEC2BIN/HEX/OCT and back, MilindLate):** good work; CI fails on Python 3.10 only (HUGEINT hex cast, see
-  above; fix is one word). Changes requested: mark `HEX2DEC("")` (Excel likely 0) and an invalid `places` with a
-  negative number as UNCHECKED instead of guessing.
-- **Issues:** #1 overflow (PR #5), #2 DEC2* (PR #7), #3 TAKE/DROP/CHOOSECOLS/TOCOL (help wanted), #4 "send a workbook
-  cellproof gets wrong" (pinned).
+- **PR #7 (DEC2BIN/HEX/OCT and back, MilindLate):** merged 2026-11-13 into `main` and the 1.0 branch (closes issue
+  #2). The Python 3.10 hex-cast fix and the guards for cases not checked in real Excel (`HEX2DEC("")`, a negative
+  invalid `places`) came in with it.
+- **Issues:** #1 overflow (PR #5), #3 TAKE/DROP/CHOOSECOLS/TOCOL (help wanted), #4 "send a workbook cellproof gets
+  wrong" (pinned).
 
 ## Known gaps
 
@@ -186,7 +187,7 @@ From Excel-saved files (`tests/test_excel_findings.py`, `tests/test_corpus_findi
 ## Next
 
 1. Launch (2026-11-10), then answer feedback fast: every "does it handle X?" becomes an issue.
-2. Finish the contributor PRs (#5, #7) and merge them.
+2. Finish PR #5 (overflow as #NUM!) and merge it.
 3. Release 1.0 (PR #8) as the second announcement.
 4. TAKE/DROP/CHOOSECOLS/CHOOSEROWS/TOCOL/TOROW (issue #3).
 5. More real analyst workbooks: each one found gaps the public files did not.
