@@ -20,10 +20,10 @@ bug. Output: `REPORT.md` / `report.json` and a dbt project that runs exactly the
 | `main` | 0.6.1 plus: the Postgres target (verification only), the browser playground, README with demo GIF. Not released |
 | Branch `v1.0-postgres`, [PR #8](https://github.com/Nikhil414/cellproof/pull/8) | **1.0**: dbt-postgres project, `postgres.verify_book`, `--target postgres --dbt`, Postgres 16 job in CI. CI green (13/13). Merge and release planned for after launch week (~2026-11-24) |
 | Playground | Live at https://nikhil414.github.io/cellproof/ (GitHub Pages, deployed by `.github/workflows/pages.yml` on every push to `main` that touches `src/`, `playground/` or the example) |
-| Tests | `v1.0-postgres`: 549 pass, 3 skip (with dbt-postgres installed; verified locally 2026-11-15). `main` carries PR #7's DEC2* tests on top of 537 pass / 9 skip |
-| CI | `tests` workflow: Windows/macOS/Linux x Python 3.10-3.13, plus (on the 1.0 branch) a `postgres` job. All green (the one cancelled macOS job on `main` after PR #7 was rerun 2026-11-15) |
+| Tests | `v1.0-postgres`: 549 pass, 3 skip (with dbt-postgres installed; verified locally 2026-11-15). `main` carries PR #7's DEC2* tests and PR #9's `--stats` tests on top of 547 pass / 3 skip |
+| CI | `tests` workflow: Windows/macOS/Linux x Python 3.10-3.13, plus (on the 1.0 branch) a `postgres` job. All green (the one cancelled macOS job on `main` after PR #7 was rerun 2026-11-15; PR #9's run green 2026-11-15) |
 | Public test workbooks (85) | **11,080 PASS / 16 FAIL / 37,814 UNRESOLVED**, identical on DuckDB 2.0, on DuckDB 1.2 (the playground) and on Postgres (with `dbt build` passing for all 85). The 16 FAIL are explained below |
-| Contributors | Open: PR #5 (overflow, changes requested). Merged: PR #7 (DEC2BIN/HEX/OCT and back, MilindLate, 2026-11-13, closes #2; unverified cases guarded, never guessed). Closed: PR #6 (superseded by #5). Issues #1, #3, #4 open, #4 pinned |
+| Contributors | Open: PR #5 (overflow, changes requested). Merged: PR #7 (DEC2BIN/HEX/OCT and back, MilindLate, 2026-11-13, closes #2; unverified cases guarded, never guessed), PR #9 (`--stats` flag: count-sorted tally of UNRESOLVED reasons on the console, 2026-11-15). Closed: PR #6 (superseded by #5). Issues #1, #3, #4 open, #4 pinned; #3 now has a contributor spec comment (2026-11-15: TAKE, DROP, CHOOSECOLS, CHOOSEROWS, TOCOL, TOROW against the `fn/dynamic.py` relation model) |
 | Launch | Public launch (Show HN, r/dataengineering, LinkedIn, Shorts/Reels) planned for Tuesday 2026-11-10. 1.0 is the second announcement |
 
 ## Where things live
