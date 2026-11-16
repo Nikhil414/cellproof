@@ -160,6 +160,8 @@ From Excel-saved files (`tests/test_excel_findings.py`, `tests/test_corpus_findi
 
 ## Open work
 
+- **PR #17 (console triage):** every conversion now prints the top unresolved reasons and the wrong answers other
+  cells read (direct readers only), and the report gained that section. Waiting for CI.
 - **PR #8, 1.0:** green, waiting for after launch week. Then: bump to 1.0.0, date the CHANGELOG, merge, tag, release,
   announce.
 - **PR #5 (overflow as #NUM!, imshah-id):** the right approach (checked per operation, so IFERROR sees it; regions,
