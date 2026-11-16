@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 (unreleased)
+## 1.0.0 (2026-11-17)
 
 - **Postgres target:** `cellproof convert book.xlsx --target postgres [--pg-url URL] [--dbt]`. Every cell is verified
   on DuckDB, then again on Postgres with the SQL translated (sqlglot, tree rewrites, and `pg_temp` helper functions with
