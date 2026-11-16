@@ -6,13 +6,11 @@ pgserver for a Postgres of its own when no URL is given).
 from __future__ import annotations
 
 import tempfile
-from collections import defaultdict
 from contextlib import contextmanager
 from pathlib import Path
 
 from cellproof.compiler import Compiled, batch_rows, input_rows
-from cellproof.model import Book, Key, Unsupported, Verdict, a1
-from cellproof.refs import resolve
+from cellproof.model import Book, Key, Verdict, a1
 
 NOT_ON_PG = "not yet on Postgres"
 
@@ -377,28 +375,10 @@ def translate(sql: str) -> str:
         raise Untranslatable(f"{type(err).__name__}: {str(err).splitlines()[0][:120]}") from err
 
 
-def _readers(book: Book) -> dict[Key, set[Key]]:
+def _readers(book: Book) -> dict[Key, list[Key]]:
     """Formula cell -> the formula cells that read it (one step)."""
-    from cellproof.r1c1 import lexed
-    formulas = [k for k, c in book.cells.items() if c.formula is not None]
-    by_sheet = defaultdict(list)
-    for k in formulas:
-        by_sheet[k[0]].append(k)
-    out: dict[Key, set[Key]] = defaultdict(set)
-    lex = lexed(book)
-    for key in formulas:
-        shape, texts = lex.get(key, (None, ()))
-        for text in texts:
-            if text[:6].lower() == "_xlpm.":
-                continue
-            try:
-                area = resolve(text, key[0], book)
-            except Unsupported:
-                continue
-            for other in by_sheet.get(area.sheet, ()):
-                if area.r1 <= other[1] <= area.r2 and area.c1 <= other[2] <= area.c2:
-                    out[other].add(key)
-    return out
+    from cellproof.impact import readers_of  # local: impact imports the tokenizer, postgres is optional
+    return readers_of(book, [k for k, c in book.cells.items() if c.formula is not None])
 
 
 def _spread(book: Book, failed: dict[Key, str]) -> dict[Key, str]:

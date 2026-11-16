@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **The console says what to fix first.** After the counts line, every conversion prints the top five unresolved
+  reasons ranked by how many cells each blocks ("Where to start"), the same ranking `REPORT.md` has always carried -
+  so a long list of unfinished cells no longer needs the report opened to be useful. `--stats` still adds the full
+  tally.
+- **Wrong answers other cells read are called out** (`REPORT.md`, `report.json`, console): a FAIL whose value feeds
+  other formulas can carry its difference further than a FAIL nobody reads. Only direct readers are listed ("read
+  by", not "blocks"): a reader may add a difference of its own, so the list is a neighbourhood, not a guarantee.
+  The reverse pass reuses the compile's tokenizing and costs one bisect per column, so whole-column references stay
+  cheap.
+
 ## 0.6.1 (2026-10-31)
 
 - **ROUND rounds the value Excel shows** (15 significant digits, half away from zero): `ROUND(1.005, 2)` is 1.01,

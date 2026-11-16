@@ -19,6 +19,8 @@ pip install cellproof
 curl -LO https://github.com/Nikhil414/cellproof/raw/main/examples/functions.xlsx
 cellproof convert functions.xlsx
 # 74 pass, 0 fail, 2 unresolved -> functions_dbt/REPORT.md
+# Where to start (unresolved, ranked by how many cells each blocks):
+#   2  MATCH approximate match needs descending sorted data: ...  (Functions!G13, Functions!G73)
 ```
 
 Then open `functions_dbt/REPORT.md`: every formula, the value Excel saved, the value the SQL gave, and why the two
@@ -45,6 +47,8 @@ saved values are a free answer key.
 ```
 $ cellproof convert examples/functions.xlsx
 74 pass, 0 fail, 2 unresolved -> examples/functions_dbt/REPORT.md
+Where to start (unresolved, ranked by how many cells each blocks):
+  2  MATCH approximate match needs descending sorted data: ...  (Functions!G13, Functions!G73)
 ```
 
 Every formula cell gets one verdict:
@@ -79,12 +83,17 @@ cellproof convert book.xlsx --dbt           # also run `dbt build` on the genera
 cellproof convert book.xlsx --stats         # print the unresolved cells' reasons, most common first
 ```
 
+After the counts line, the console shows what to fix first: the top unresolved reasons ranked by how many cells each
+blocks, and any wrong answers other formulas read (direct readers only, so a difference that travels is visible).
+`REPORT.md` and `report.json` hold the full lists.
+
 The output folder holds:
 
 - **`REPORT.md` / `report.json`**: every verdict, failed cells with both values, unresolved cells with the reason,
   findings (for example a number stored as text, which Excel skips in SUM), and which blocks of rows became readable
   table models. The unresolved reasons are ranked by how many cells depend on them ("Where to start"), so a long list
-  of unresolved cells says what to fix first.
+  of unresolved cells says what to fix first. A failed cell that other formulas read is listed with its readers
+  ("Wrong answers other cells read"), because a wrong value that feeds other cells can spread.
 - **A dbt project** (`dbt_project.yml`, `models/`, `seeds/input_cells.csv`) that recomputes the workbook on DuckDB.
   It runs exactly the SQL the verifier checked.
 

@@ -5,21 +5,30 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from cellproof.impact import impact, roots_of
-from cellproof.model import Key, Verdict, a1
+from cellproof.impact import impact, roots_of, wrong
+from cellproof.model import Book, Key, Verdict, a1
 
 
 def _md(value) -> str:
     return "(no value)" if value is None else str(value).replace("|", "\\|")
 
 
+def readers_text(names: list[str]) -> str:
+    """The first five readers, then how many more: a whole column can read one wrong cell."""
+    return ", ".join(names[:5]) + (f", and {len(names) - 5} more" if len(names) > 5 else "")
+
+
 def write_report(verdicts: list[Verdict], findings: list[str], out: Path, source: str,
                  computed: frozenset[Key] | set[Key] = frozenset(), notes=(),
-                 chains: dict[Key, Key] | None = None) -> Counter:
+                 chains: dict[Key, Key] | None = None, book: Book | None = None,
+                 groups: list[dict] | None = None, wrong_answers: list[dict] | None = None) -> Counter:
     counts = Counter({"PASS": 0, "FAIL": 0, "UNRESOLVED": 0})
     counts.update(v.status for v in verdicts)
     findings = list(dict.fromkeys(findings))
-    groups = impact(chains, verdicts) if chains is not None else None
+    if groups is None and chains is not None:
+        groups = impact(chains, verdicts)
+    if wrong_answers is None and book is not None:
+        wrong_answers = wrong(book, verdicts)
     roots = roots_of(chains) if chains else {}
 
     data = {
@@ -34,6 +43,8 @@ def write_report(verdicts: list[Verdict], findings: list[str], out: Path, source
     }
     if groups is not None:
         data["unresolved_groups"] = groups
+    if wrong_answers:
+        data["wrong_answers"] = wrong_answers
     (out / "report.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
     lines = [f"# cellproof report: {source}", "", "| Status | Cells |", "|---|---|"]
@@ -50,6 +61,13 @@ def write_report(verdicts: list[Verdict], findings: list[str], out: Path, source
                   "| Reason | Cells | Depend on it | First cells |", "|---|---|---|---|"]
         lines += [f"| {_md(g['reason'])} | {g['cells']:,} | {g['dependents']:,} | {', '.join(g['examples'])} |"
                   for g in groups]
+    if wrong_answers:
+        lines += ["", "## Wrong answers other cells read", "",
+                  "Excel has one value and cellproof's SQL has another, and other formulas read the wrong one, so the "
+                  "difference can travel. These are direct readers only: a reader may add its own difference.", "",
+                  "| Cell | Excel | SQL | Read by |", "|---|---|---|---|"]
+        lines += [f"| {w['cell']} | {_md(w['expected'])} | {_md(w['actual'])} | {readers_text(w['readers'])} |"
+                  for w in wrong_answers]
     if notes:
         lines += ["", "## Regions", ""] + [f"- {n}" for n in notes]
     if findings:

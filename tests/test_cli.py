@@ -60,7 +60,35 @@ def test_stats_off_by_default_keeps_output_unchanged(tmp_path, capsys):
     wb = tmp_path / "b.xlsx"
     write_xlsx(wb, {"S": {"A1": 1, "A2": ("=TODAY()", 2)}})
     assert main(["convert", str(wb), "--out", str(tmp_path / "out")]) == 0
-    assert "Unresolved by reason" not in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Unresolved by reason" not in out
+    assert "Where to start" in out  # the ranked summary is always on; --stats adds the raw tally
+
+
+def test_console_shows_where_to_start_and_wrong_answers(tmp_path, capsys):
+    wb = tmp_path / "b.xlsx"
+    write_xlsx(wb, {"S": {
+        "A1": ("=GAMMA(1)", 1),
+        "A2": ("=A1+1", 2),
+        "B1": ("=1+1", 3),
+        "C1": ("=B1*3", 6),
+    }})
+    assert main(["convert", str(wb), "--out", str(tmp_path / "out")]) == 1
+    out = capsys.readouterr().out
+    assert "Where to start (unresolved, ranked by how many cells each blocks):" in out
+    assert "function GAMMA not supported yet" in out
+    assert "Wrong answers other cells read (direct readers only):" in out
+    assert "S!B1" in out
+    assert out.isascii()
+
+
+def test_console_stays_quiet_when_everything_passes(tmp_path, capsys):
+    wb = tmp_path / "b.xlsx"
+    write_xlsx(wb, {"S": {"A1": 1, "A2": ("=A1+1", 2)}})
+    assert main(["convert", str(wb), "--out", str(tmp_path / "out")]) == 0
+    out = capsys.readouterr().out
+    assert "Where to start" not in out
+    assert "Wrong answers" not in out
 
 
 def test_console_that_cannot_print_unicode(tmp_path, monkeypatch):

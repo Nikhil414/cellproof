@@ -9,9 +9,27 @@ from pathlib import Path
 from cellproof.compiler import NO_VALUE, compile_book
 from cellproof.compute import fill_missing
 from cellproof.emitter import run_dbt, write_project
+from cellproof.impact import impact, wrong
 from cellproof.reader import UnreadableWorkbook, load
-from cellproof.report import write_report
+from cellproof.report import readers_text, write_report
 from cellproof.verifier import SqlFailed, verify_book
+
+
+def _value(value) -> str:
+    return "(no value)" if value is None else str(value)
+
+
+def _summarise(groups: list[dict], wrong_answers: list[dict]) -> None:
+    """What to fix first, on the console: the ranked unresolved reasons and the wrong answers other cells read."""
+    if groups:
+        print("Where to start (unresolved, ranked by how many cells each blocks):")
+        for g in groups[:5]:
+            print(f"  {g['cells']:,}  {g['reason']}  ({', '.join(g['examples'])})")
+    if wrong_answers:
+        print("Wrong answers other cells read (direct readers only):")
+        for w in wrong_answers[:5]:
+            print(f"  {len(w['readers']):,}  {w['cell']}  Excel {_value(w['expected'])}, SQL {_value(w['actual'])}"
+                  f"  read by {readers_text(w['readers'])}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -61,11 +79,14 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         compiled.findings.append(f"verified on Postgres: these verdicts are Postgres's ({duck} cells PASS on DuckDB)")
     write_project(book, compiled, out, args.workbook.stem)
+    groups = impact(compiled.chains, verdicts)
+    wrong_answers = wrong(book, verdicts)
     counts = write_report(verdicts, compiled.findings, out, args.workbook.name, computed, compiled.notes,
-                          compiled.chains)
+                          compiled.chains, book, groups, wrong_answers)
     if computed:
         print(f"{len(computed)} expected values computed by the formulas library (the file had none saved)")
     print(f"{counts['PASS']} pass, {counts['FAIL']} fail, {counts['UNRESOLVED']} unresolved -> {out / 'REPORT.md'}")
+    _summarise(groups, wrong_answers)
     if args.stats:
         reasons = Counter(v.reason for v in verdicts if v.status == "UNRESOLVED")
         if reasons:
