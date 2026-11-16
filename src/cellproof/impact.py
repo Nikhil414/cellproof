@@ -80,6 +80,11 @@ def readers_of(book: Book, keys) -> dict[Key, list[Key]]:
         by_col[(sheet, col)].append(row)
     for rows in by_col.values():
         rows.sort()
+    cols_of: dict[str, list[int]] = defaultdict(list)  # a sheet's wanted columns, sorted: a ref spans a few of them
+    for sheet, col in by_col:
+        cols_of[sheet].append(col)
+    for cols in cols_of.values():
+        cols.sort()
     out: dict[Key, set[Key]] = defaultdict(set)
     for key, (shape, texts) in lexed(book).items():
         if shape is None or not shape.parses():
@@ -91,11 +96,11 @@ def readers_of(book: Book, keys) -> dict[Key, list[Key]]:
                 area = resolve(text, key[0], book)
             except (Unsupported, RecursionError):
                 continue  # the compiler reports the real reason for this cell
-            for (sheet, col), rows in by_col.items():
-                if sheet != area.sheet or not area.c1 <= col <= area.c2:
-                    continue
+            cols = cols_of.get(area.sheet, [])
+            for col in cols[bisect_left(cols, area.c1):bisect_right(cols, area.c2)]:
+                rows = by_col[(area.sheet, col)]
                 for row in rows[bisect_left(rows, area.r1):bisect_right(rows, area.r2)]:
-                    target = (sheet, row, col)
+                    target = (area.sheet, row, col)
                     if target != key:
                         out[target].add(key)
     return {k: sorted(v) for k, v in out.items()}
