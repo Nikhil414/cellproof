@@ -38,8 +38,9 @@ def main() -> None:
         done = subprocess.run([sys.executable, "-I", "-m", "cellproof", "convert", str(f), "--out", str(out)] + sys.argv[2:],
                               capture_output=True, text=True, timeout=600)
         exits[done.returncode] += 1
-        last = (done.stdout + done.stderr).strip().splitlines()[-1:] or [""]
-        print(f"{done.returncode} | {f.parent.name}/{f.name} | {last[0][:100]}")
+        lines = (done.stdout + done.stderr).strip().splitlines()
+        last = next((line for line in reversed(lines) if " pass, " in line), lines[-1] if lines else "")
+        print(f"{done.returncode} | {f.parent.name}/{f.name} | {last[:100]}")
         report = out / "report.json"
         if report.exists():
             totals.update(json.loads(report.read_text(encoding="utf-8"))["counts"])

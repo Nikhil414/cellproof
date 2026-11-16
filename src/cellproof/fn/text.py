@@ -25,6 +25,17 @@ def _n(c, node, sheet: str) -> Expr:
     return num(c.expr(node, sheet) if node is not None else BLANK)
 
 
+def _t_strict(c, node, sheet: str) -> Expr:
+    """A text argument that real Excel refuses as TRUE/FALSE (the X2DEC family): #VALUE! (test.xlsx J7, J55)."""
+    raw = c.expr(node, sheet) if node is not None else BLANK
+    t = txt(raw)
+    if raw.type == "bool":
+        return Expr("CAST(NULL AS VARCHAR)", "txt", errs(t.err, "'#VALUE!'"))
+    if raw.type == "any":
+        return Expr(t.sql, "txt", errs(t.err, f"(CASE WHEN {raw.kind} = 'b' THEN '#VALUE!' END)"))
+    return t
+
+
 def _bad(cond: str) -> str:
     return f"(CASE WHEN {cond} THEN '#VALUE!' END)"
 
@@ -308,28 +319,41 @@ def unichar(c, args, sheet):
                 "txt", errs(n.err, _bad(bad), odd))
 
 
+def _dec2_out(radix: int, min_val: int, max_val: int, offset: int, raw: Expr, n: Expr, places_node, c, sheet: str):
+    """The DEC2* half of a base conversion: the integer n (a num Expr) formatted in the base, the raw value
+    argument kept for the text checks. Real Excel checks places first: DEC2BIN("E", 0) is #NUM!, not the
+    text's #VALUE! (BASES.xlsx places!G38:G49); places are ignored for a negative number."""
+    num_bad = f"(trunc({n.sql}) < {min_val} OR trunc({n.sql}) > {max_val})"
+    if places_node is None:
+        sql = (f"(CASE WHEN NOT ({num_bad}) THEN "
+               f"CASE WHEN {n.sql} < 0 THEN to_base(CAST(greatest(0, {offset} + trunc(least(greatest({n.sql}, {min_val}), 0))) AS BIGINT), {radix}, 10) "
+               f"ELSE to_base(CAST(greatest(0, trunc(least({n.sql}, {max_val}))) AS BIGINT), {radix}, 0) END END)")
+        return Expr(sql, "txt", errs(n.err, f"(CASE WHEN {num_bad} THEN '#NUM!' END)"))
+    raw_p = c.expr(places_node, sheet) if places_node is not None else BLANK
+    p = num(raw_p)
+    tp = f"TRY_CAST(trunc({p.sql}) AS INTEGER)"
+    safe_p = f"least(greatest(COALESCE({tp}, 0), 0), 10)"
+    p_bad = (f"({n.sql} >= 0 AND ({tp} IS NULL OR {tp} < 1 OR {tp} > 10 OR "
+             f"length(to_base(CAST(greatest(0, trunc(least({n.sql}, {max_val}))) AS BIGINT), {radix})) > {tp}))")
+    # the number is text that is not a number: only for a text argument is n.sql NULL while the value stays
+    txt_raw = (raw.sql if raw.type == "txt" else
+               f"(CASE WHEN {raw.kind} = 's' THEN {raw.txt} END)" if raw.type == "any" else "CAST(NULL AS VARCHAR)")
+    p_bad_text = f"(COALESCE({tp} < 1 OR {tp} > 10, FALSE) AND {txt_raw} IS NOT NULL AND {n.sql} IS NULL)"
+    odd = f"(CASE WHEN {n.sql} < 0 AND ({p.err} = '#VALUE!' OR {tp} IS NULL OR {tp} < 1 OR {tp} > 10) THEN '{UNCHECKED}' END)"
+    err = errs(f"(CASE WHEN {p_bad_text} THEN '#NUM!' END)", n.err, raw_p.err, odd, p.err,
+               f"(CASE WHEN {num_bad} OR {p_bad} THEN '#NUM!' END)")
+    sql = (f"(CASE WHEN NOT ({num_bad} OR {p_bad}) THEN "
+           f"CASE WHEN {n.sql} < 0 THEN to_base(CAST(greatest(0, {offset} + trunc(least(greatest({n.sql}, {min_val}), 0))) AS BIGINT), {radix}, 10) "
+           f"ELSE to_base(CAST(greatest(0, trunc(least({n.sql}, {max_val}))) AS BIGINT), {radix}, {safe_p}) END END)")
+    return Expr(sql, "txt", err)
+
+
 def _dec2base(name: str, radix: int, min_val: int, max_val: int, offset: int):
     def impl(c, args, sheet):
         arity(name, args, 1, 2)
-        n = _n(c, args[0], sheet)
-        num_bad = f"(trunc({n.sql}) < {min_val} OR trunc({n.sql}) > {max_val})"
-        if len(args) == 2:
-            raw_p = c.expr(args[1], sheet) if args[1] is not None else BLANK
-            p = num(raw_p)
-            tp = f"TRY_CAST(trunc({p.sql}) AS INTEGER)"
-            safe_p = f"least(greatest(COALESCE({tp}, 0), 0), 10)"
-            p_bad = (f"({n.sql} >= 0 AND ({tp} IS NULL OR {tp} < 1 OR {tp} > 10 OR "
-                     f"length(to_base(CAST(greatest(0, trunc(least({n.sql}, {max_val}))) AS BIGINT), {radix})) > {tp}))")
-            odd = f"(CASE WHEN {n.sql} < 0 AND ({p.err} = '#VALUE!' OR {tp} IS NULL OR {tp} < 1 OR {tp} > 10) THEN '{UNCHECKED}' END)"
-            err = errs(n.err, raw_p.err, odd, p.err, f"(CASE WHEN {num_bad} OR {p_bad} THEN '#NUM!' END)")
-        else:
-            safe_p = "0"
-            p_bad = "FALSE"
-            err = errs(n.err, f"(CASE WHEN {num_bad} THEN '#NUM!' END)")
-        sql = (f"(CASE WHEN NOT ({num_bad} OR {p_bad}) THEN "
-               f"CASE WHEN {n.sql} < 0 THEN to_base(CAST(greatest(0, {offset} + trunc(least(greatest({n.sql}, {min_val}), 0))) AS BIGINT), {radix}, 10) "
-               f"ELSE to_base(CAST(greatest(0, trunc(least({n.sql}, {max_val}))) AS BIGINT), {radix}, {safe_p}) END END)")
-        return Expr(sql, "txt", err)
+        raw = c.expr(args[0], sheet) if args[0] is not None else BLANK
+        n = num_strict(raw)   # real Excel: TRUE/FALSE as the number is #VALUE! (test.xlsx J7, J17:J19, J27, J55)
+        return _dec2_out(radix, min_val, max_val, offset, raw, n, args[1] if len(args) == 2 else None, c, sheet)
     register(name)(impl)
 
 
@@ -341,7 +365,7 @@ _dec2base("DEC2OCT", 8, -536870912, 536870911, 1073741824)
 @register("HEX2DEC")
 def hex2dec(c, args, sheet):
     arity("HEX2DEC", args, 1, 1)
-    t = _t(c, args[0], sheet)
+    t = _t_strict(c, args[0], sheet)
     bad = f"NOT regexp_matches({t.sql}, '^[0-9A-Fa-f]{{1,10}}$')"
     sql = (f"(SELECT CASE WHEN NOT regexp_matches(st, '^[0-9A-Fa-f]{{1,10}}$') THEN NULL "
            f"WHEN length(st) = 10 AND upper(substr(st, 1, 1)) IN ('8','9','A','B','C','D','E','F') "
@@ -354,7 +378,7 @@ def hex2dec(c, args, sheet):
 @register("BIN2DEC")
 def bin2dec(c, args, sheet):
     arity("BIN2DEC", args, 1, 1)
-    t = _t(c, args[0], sheet)
+    t = _t_strict(c, args[0], sheet)
     bad = f"NOT regexp_matches({t.sql}, '^[01]{{1,10}}$')"
     sql = (f"(SELECT CASE WHEN NOT regexp_matches(st, '^[01]{{1,10}}$') THEN NULL "
            f"WHEN length(st) = 10 AND substr(st, 1, 1) = '1' "
@@ -367,7 +391,7 @@ def bin2dec(c, args, sheet):
 @register("OCT2DEC")
 def oct2dec(c, args, sheet):
     arity("OCT2DEC", args, 1, 1)
-    t = _t(c, args[0], sheet)
+    t = _t_strict(c, args[0], sheet)
     bad = f"NOT regexp_matches({t.sql}, '^[0-7]{{1,10}}$')"
     terms = " + ".join(f"(TRY_CAST(substr(p, {i + 1}, 1) AS BIGINT) << {3 * (9 - i)})" for i in range(10))
     sql = (f"(SELECT CASE WHEN NOT regexp_matches(st, '^[0-7]{{1,10}}$') THEN NULL "
@@ -377,3 +401,24 @@ def oct2dec(c, args, sheet):
            f"FROM (SELECT st, {terms} AS val "
            f"FROM (SELECT {t.sql} AS st, lpad({t.sql}, 10, '0') AS p) oct_inner) oct_outer)")
     return Expr(sql, "num", errs(t.err, f"(CASE WHEN {t.sql} = '' THEN '{UNCHECKED}' WHEN {bad} THEN '#NUM!' END)"))
+
+
+def _cross(name: str, x2dec, radix: int, min_val: int, max_val: int, offset: int):
+    """HEX2BIN and friends: the X2DEC parse of the value feeds the DEC2* format, and the target base's own
+    two's-complement range still gates it (#NUM! - test.xlsx ENGINEERING!S26: HEX2BIN(9999999999), a 10-digit
+    hex that decodes fine but is far outside the 10-bit binary range)."""
+    def impl(c, args, sheet):
+        arity(name, args, 1, 2)
+        raw = c.expr(args[0], sheet) if args[0] is not None else BLANK
+        # a blank cell is 0: HEX2BIN of a blank cell is '0' (test.xlsx H26, H28, H54, H56, Excel-saved)
+        n = num(BLANK) if raw.type == "blank" else x2dec(c, args[:1], sheet)
+        return _dec2_out(radix, min_val, max_val, offset, raw, n, args[1] if len(args) == 2 else None, c, sheet)
+    register(name)(impl)
+
+
+_cross("HEX2BIN", hex2dec, 2, -512, 511, 1024)
+_cross("HEX2OCT", hex2dec, 8, -536870912, 536870911, 1073741824)
+_cross("BIN2HEX", bin2dec, 16, -549755813888, 549755813887, 1099511627776)
+_cross("BIN2OCT", bin2dec, 8, -536870912, 536870911, 1073741824)
+_cross("OCT2HEX", oct2dec, 16, -549755813888, 549755813887, 1099511627776)
+_cross("OCT2BIN", oct2dec, 2, -512, 511, 1024)

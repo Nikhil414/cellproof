@@ -9,7 +9,7 @@ from xlsxkit import book_of, write_xlsx
 
 from cellproof.cli import main
 from cellproof.compiler import compile_book
-from cellproof.impact import impact, roots_of
+from cellproof.impact import impact, readers_of, roots_of, wrong
 from cellproof.model import Verdict
 from cellproof.report import write_report
 from cellproof.verifier import verify
@@ -113,3 +113,64 @@ def test_convert_end_to_end_shows_where_to_start(tmp_path):
     assert main(["convert", str(wb), "--out", str(tmp_path / "out")]) == 0
     md = (tmp_path / "out" / "REPORT.md").read_text(encoding="utf-8")
     assert "| function GAMMA not supported yet | 3 | 2 | S!A1 |" in md
+
+
+def test_readers_of_finds_single_cells_ranges_and_whole_columns():
+    book = book_of({"S": {
+        "A1": ("=1+1", 2),
+        "A2": 1, "A3": 2,
+        "B1": ("=A1*3", 6),
+        "C1": ("=SUM(A2:A3)", 3),
+        "D1": ("=SUM(A:A)", 3),
+    }})
+    assert readers_of(book, [("S", 1, 1)]) == {("S", 1, 1): [("S", 1, 2), ("S", 1, 4)]}
+    assert readers_of(book, [("S", 2, 1)]) == {("S", 2, 1): [("S", 1, 3), ("S", 1, 4)]}
+    assert readers_of(book, []) == {}
+
+
+def test_readers_of_crosses_sheets_and_names():
+    book = book_of({"T": {"B2": ("=1+1", 2)}, "S": {"A1": ("=T!B2", 2), "A2": ("=Rate", 2)}},
+                   names={"Rate": ("T", "B2")})
+    assert readers_of(book, [("T", 2, 2)]) == {("T", 2, 2): [("S", 1, 1), ("S", 2, 1)]}
+
+
+def test_readers_of_skips_a_formula_that_does_not_parse():
+    book = book_of({"S": {"A1": ("=1", 1), "B1": ("=A1+", 1)}})
+    assert readers_of(book, [("S", 1, 1)]) == {}
+
+
+def test_wrong_lists_only_failed_cells_with_readers():
+    book = book_of({"S": {"A1": ("=1+1", 3), "B1": ("=A1*3", 6), "C1": ("=1+1", 3)}})
+    verdicts = verify(book, compile_book(book))
+    assert wrong(book, verdicts) == [
+        {"cell": "S!A1", "expected": 3.0, "actual": 2.0, "readers": ["S!B1"]},
+    ]
+
+
+def test_report_lists_wrong_answers_other_cells_read(tmp_path):
+    book = book_of({"S": {"A1": ("=1+1", 3), "B1": ("=A1*3", 6), "C1": ("=1+1", 3)}})
+    verdicts = verify(book, compile_book(book))
+    write_report(verdicts, [], tmp_path, "b.xlsx", book=book)
+    md = (tmp_path / "REPORT.md").read_text(encoding="utf-8")
+    assert "## Wrong answers other cells read" in md
+    assert "| S!A1 | 3.0 | 2.0 | S!B1 |" in md
+    data = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    assert data["wrong_answers"] == [
+        {"cell": "S!A1", "expected": 3.0, "actual": 2.0, "readers": ["S!B1"]},
+    ]
+
+
+def test_report_leaves_wrong_answers_out_without_a_book_or_readers(tmp_path):
+    verdicts = [Verdict(("S", 1, 1), "FAIL", 3.0, 2.0)]
+    write_report(verdicts, [], tmp_path, "b.xlsx")
+    md = (tmp_path / "REPORT.md").read_text(encoding="utf-8")
+    assert "Wrong answers other cells read" not in md
+    data = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    assert "wrong_answers" not in data
+
+    book = book_of({"S": {"A1": ("=1+1", 3)}})  # FAIL, but no other cell reads it
+    write_report(verify(book, compile_book(book)), [], tmp_path, "b.xlsx", book=book)
+    md = (tmp_path / "REPORT.md").read_text(encoding="utf-8")
+    assert "Wrong answers other cells read" not in md
+    data = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    assert "wrong_answers" not in data
