@@ -83,6 +83,8 @@ cellproof convert book.xlsx                 # writes book_dbt/ next to the file
 cellproof convert book.xlsx --out out_dir   # choose the folder
 cellproof convert book.xlsx --dbt           # also run `dbt build` on the generated project
 cellproof convert book.xlsx --stats         # print the unresolved cells' reasons, most common first
+cellproof sql book.xlsx --sheet Sales --range D2:D1000   # the SQL for those cells only
+cellproof convert book.xlsx --target postgres            # verify on Postgres too (see below)
 ```
 
 After the counts line, the console shows what to fix first: the top unresolved reasons ranked by how many cells each
@@ -98,6 +100,26 @@ The output folder holds:
   ("Wrong answers other cells read"), because a wrong value that feeds other cells can spread.
 - **A dbt project** (`dbt_project.yml`, `models/`, `seeds/input_cells.csv`) that recomputes the workbook on DuckDB.
   It runs exactly the SQL the verifier checked.
+
+### One cell's answer, as SQL
+
+`cellproof sql` prints a runnable script instead of writing a project: paste it into `duckdb`, or pipe it.
+
+```bash
+cellproof sql book.xlsx --sheet Sales --range D2:D1000 > answer.sql
+duckdb < answer.sql
+cellproof sql book.xlsx --out answer.sql --stats    # write the file, say how much of the workbook it needed
+```
+
+The script creates the `cells` table, inserts the input cells those formulas read, adds one statement per formula
+batch in dependency order, and ends with a `SELECT` for the cells you asked for. Everything the selection does not
+need is dropped: with `--range D2` on `examples/functions.xlsx`, all 74 formulas and 16 statements of the workbook
+become one row and no formulas at all; asking for `G20:G30` keeps 26 formulas in 4 statements.
+
+It answers exactly what `cellproof convert` would compute for those cells. A cell that could not be translated is not
+in the script (nothing could read it anyway); the reason is printed to stderr, ranked, and the command exits 1, so a
+piped script never quietly loses a cell. Without `--sheet` the whole workbook is the selection (hidden array-constant
+sheets are left out).
 
 ### On Postgres
 

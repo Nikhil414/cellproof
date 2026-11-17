@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0 (unreleased)
+
+- **`cellproof sql book.xlsx [--sheet X] [--range D2:D1000] [--out FILE]`:** prints a runnable DuckDB script for a
+  selection of cells instead of writing a whole dbt project. The workbook is compiled as usual, then everything the
+  selection does not need is dropped: only the input cells the formulas read, the formula batches they depend on (in
+  dependency order), and a final `SELECT` for the cells asked for. A batch is kept or dropped whole, because it is one
+  statement; the kept batches are closed under "reads", so the script always answers exactly what `convert` computes
+  for those cells. `--range D2` on `examples/functions.xlsx` turns 16 statements into none; `G20:G30` keeps 4 of 16.
+  SQL goes to stdout and the reasons an asked-for cell is missing go to stderr (ranked, "Where to start"), so
+  `cellproof sql book.xlsx > run.sql` always yields a file you can run; exit code 1 says a cell was left out.
+
 ## 1.0.0 (2026-11-17)
 
 - **Postgres target:** `cellproof convert book.xlsx --target postgres [--pg-url URL] [--dbt]`. Every cell is verified

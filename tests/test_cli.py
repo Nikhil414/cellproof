@@ -184,3 +184,101 @@ def test_a_rejected_region_or_spill_is_not_rebuilt_forever(tmp_path, monkeypatch
     assert main(["convert", str(wb), "--out", str(out)]) == 3
     report = json.loads((out / "report.json").read_text(encoding="utf-8"))
     assert {c["status"] for c in report["cells"]} == {"UNRESOLVED"}
+
+
+# --- cellproof sql ------------------------------------------------------------------------------
+
+SQL_SHEET = {"A1": "amount", "B1": "tax"}
+for _r in range(2, 12):
+    SQL_SHEET[f"A{_r}"] = float(_r)
+    SQL_SHEET[f"B{_r}"] = (f"=A{_r}*2", float(_r * 2))
+SQL_SHEET.update({"D1": ("=B9+1", 19.0), "E1": ("=BESSELJ(1,1)", 0.0)})
+
+
+def _sql_book(tmp_path, name="s.xlsx"):
+    wb = tmp_path / name
+    write_xlsx(wb, {"S": SQL_SHEET})
+    return wb
+
+
+def test_sql_prints_only_sql_on_stdout(tmp_path, capsys):
+    import duckdb
+    wb = _sql_book(tmp_path)
+    assert main(["sql", str(wb), "--sheet", "S", "--range", "D1"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out.isascii()
+    rows = duckdb.connect().execute(captured.out).fetchall()
+    assert rows == [("S", 1, 4, "n", 19.0, None)]
+    assert "Where to start" not in captured.out
+
+
+def test_sql_reports_an_untranslatable_cell_on_stderr_and_exits_1(tmp_path, capsys):
+    wb = _sql_book(tmp_path)
+    assert main(["sql", str(wb), "--sheet", "S", "--range", "D1:E1"]) == 1
+    captured = capsys.readouterr()
+    assert "1 of the 2 cells asked for could not be translated" in captured.err
+    assert "function BESSELJ not supported yet" in captured.err
+    assert "BESSELJ" not in captured.out
+
+
+def test_sql_out_writes_a_file_and_leaves_stdout_empty(tmp_path, capsys):
+    import duckdb
+    wb = _sql_book(tmp_path)
+    target = tmp_path / "deep" / "run.sql"
+    assert main(["sql", str(wb), "--sheet", "S", "--range", "D1", "--out", str(target)]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "wrote" in captured.err
+    assert duckdb.connect().execute(target.read_text(encoding="utf-8")).fetchall()[0][4] == 19.0
+
+
+def test_sql_stats_goes_to_stderr(tmp_path, capsys):
+    wb = _sql_book(tmp_path)
+    assert main(["sql", str(wb), "--sheet", "S", "--range", "D1", "--stats"]) == 0
+    captured = capsys.readouterr()
+    assert "the workbook compiles 11 formula cells" in captured.err
+    assert "this SQL keeps 11 of them in 2" in captured.err
+    assert "the workbook compiles" not in captured.out
+
+
+def test_sql_range_needs_a_sheet_when_there_are_two(tmp_path, capsys):
+    wb = tmp_path / "two.xlsx"
+    write_xlsx(wb, {"S": {"A1": 1}, "T": {"A1": 2}})
+    assert main(["sql", str(wb), "--range", "A1:A2"]) == 2
+    assert "--range needs --sheet" in capsys.readouterr().err
+
+
+def test_sql_unknown_sheet_exits_2(tmp_path, capsys):
+    wb = _sql_book(tmp_path)
+    assert main(["sql", str(wb), "--sheet", "Nope"]) == 2
+    assert "no sheet 'Nope'" in capsys.readouterr().err
+
+
+def test_sql_unreadable_file_exits_2(tmp_path, capsys):
+    bad = tmp_path / "x.xls"
+    bad.write_bytes(b"x")
+    assert main(["sql", str(bad)]) == 2
+    assert "save the workbook as .xlsx" in capsys.readouterr().err
+
+
+def test_sql_whole_workbook_by_default(tmp_path, capsys):
+    import duckdb
+    wb = _sql_book(tmp_path)
+    assert main(["sql", str(wb)]) == 1  # E1 is still there and still unsupported
+    rows = duckdb.connect().execute(capsys.readouterr().out).fetchall()
+    assert [r[1:3] for r in rows] == [(1, 1), (1, 2), (1, 4), (2, 1), (2, 2), (3, 1), (3, 2), (4, 1), (4, 2),
+                                      (5, 1), (5, 2), (6, 1), (6, 2), (7, 1), (7, 2), (8, 1), (8, 2), (9, 1),
+                                      (9, 2), (10, 1), (10, 2), (11, 1), (11, 2)]
+
+
+def test_sql_keeps_non_ascii_values_exact(tmp_path, capsys):
+    """A Windows console may not be able to print these; the SQL bytes must not lose them - a replaced sheet name
+    would make the script answer the wrong cells."""
+    import duckdb
+    wb = tmp_path / "u.xlsx"
+    write_xlsx(wb, {"Verkäufe": {"A1": "café — 10€", "A2": ("=LEN(A1)", 10)}})
+    assert main(["sql", str(wb), "--sheet", "Verkäufe", "--range", "A1:A2"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out.isascii() is False
+    rows = duckdb.connect().execute(captured.out).fetchall()
+    assert rows == [("Verkäufe", 1, 1, "s", None, "café — 10€"), ("Verkäufe", 2, 1, "n", 10.0, None)]

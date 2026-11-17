@@ -1,4 +1,4 @@
-"""cellproof convert WORKBOOK [--out DIR] [--dbt]"""
+"""cellproof convert WORKBOOK [--out DIR] [--dbt] | cellproof sql WORKBOOK [--sheet S] [--range A1:A9] [--out FILE]"""
 from __future__ import annotations
 
 import argparse
@@ -10,6 +10,7 @@ from cellproof.compiler import NO_VALUE, compile_book
 from cellproof.compute import fill_missing
 from cellproof.emitter import run_dbt, write_project
 from cellproof.impact import impact, wrong
+from cellproof.query import QueryError, build, check, selection
 from cellproof.reader import UnreadableWorkbook, load
 from cellproof.report import readers_text, write_report
 from cellproof.verifier import SqlFailed, verify_book
@@ -19,17 +20,75 @@ def _value(value) -> str:
     return "(no value)" if value is None else str(value)
 
 
-def _summarise(groups: list[dict], wrong_answers: list[dict]) -> None:
+def _summarise(groups: list[dict], wrong_answers: list[dict], file=None) -> None:
     """What to fix first, on the console: the ranked unresolved reasons and the wrong answers other cells read."""
+    file = file or sys.stdout
     if groups:
-        print("Where to start (unresolved, ranked by how many cells each blocks):")
+        print("Where to start (unresolved, ranked by how many cells each blocks):", file=file)
         for g in groups[:5]:
-            print(f"  {g['cells']:,}  {g['reason']}  ({', '.join(g['examples'])})")
+            print(f"  {g['cells']:,}  {g['reason']}  ({', '.join(g['examples'])})", file=file)
     if wrong_answers:
-        print("Wrong answers other cells read (direct readers only):")
+        print("Wrong answers other cells read (direct readers only):", file=file)
         for w in wrong_answers[:5]:
             print(f"  {len(w['readers']):,}  {w['cell']}  Excel {_value(w['expected'])}, SQL {_value(w['actual'])}"
-                  f"  read by {readers_text(w['readers'])}")
+                  f"  read by {readers_text(w['readers'])}", file=file)
+
+
+def _sql(args) -> int:
+    """`cellproof sql`: compile the whole workbook, print only what the selection needs. SQL to stdout, the reasons
+    an asked-for cell is missing to stderr, so `cellproof sql book.xlsx > run.sql` yields a file you can run."""
+    try:
+        book = load(args.workbook)
+    except UnreadableWorkbook as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
+    try:  # the selection is checked before the workbook is compiled: a typo'd range should not cost a compile
+        check(book, args.sheet, args.range)
+    except QueryError as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
+    book, computed, why = fill_missing(book, args.workbook)
+    compiled = compile_book(book)
+    if why:
+        compiled.unresolved.update({k: f"{r} ({why})" for k, r in compiled.unresolved.items() if r == NO_VALUE})
+    try:  # again, now that the compiler has added the hidden array-constant sheets (selection excludes them)
+        target = selection(book, args.sheet, args.range)
+    except QueryError as err:  # unreachable: check() passed on the same arguments
+        print(f"error: {err}", file=sys.stderr)
+        return 2
+    answer = build(book, compiled, target)
+    if computed:
+        print(f"{len(computed)} expected values computed by the formulas library (the file had none saved)",
+              file=sys.stderr)
+    if answer.unresolved:
+        print(f"{len(answer.unresolved):,} of the {len(answer.selection):,} cells asked for could not be translated "
+              f"and are not in this SQL (where to start):", file=sys.stderr)
+        _summarise(answer.groups, [], file=sys.stderr)
+    if args.stats:
+        total = len(compiled.steps)
+        print(f"the workbook compiles {total:,} formula cells in {len(compiled.batches):,} statement(s); "
+              f"this SQL keeps {len(answer.computed):,} of them in {answer.batches:,}, "
+              f"reading {answer.inputs:,} input cells", file=sys.stderr)
+    if args.out is None:
+        _write_sql(answer.sql)
+    else:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(answer.sql, encoding="utf-8")
+        print(f"wrote {args.out} ({answer.batches:,} statement(s))", file=sys.stderr)
+    return 1 if answer.unresolved else 0
+
+
+def _write_sql(text: str) -> None:
+    """The SQL as UTF-8 bytes: sheet names and text values can hold any character, and a console encoding that
+    cannot print them (Windows' cp1252, or an ASCII redirect) must replace them - a replaced sheet name would make
+    the script answer the wrong cells, which is worse than mojibake on the way through."""
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:
+        sys.stdout.write(text)  # a captured stream without bytes (rare): let it decide
+        return
+    sys.stdout.flush()
+    buffer.write(text.encode("utf-8"))
+    buffer.flush()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -47,7 +106,19 @@ def main(argv: list[str] | None = None) -> int:
     convert.add_argument("--pg-url", help="the Postgres to verify on (default: a Postgres of cellproof's own)")
     convert.add_argument("--stats", action="store_true",
                          help="print a tally of the unresolved cells' reasons, most common first")
+    sql = sub.add_parser("sql", help="print the SQL for a selection of cells, and nothing it does not need",
+                         description="Print a runnable DuckDB script that answers the cells you name: the input cells "
+                                     "they read, the formulas in between, and a final SELECT. Exit 1 when an "
+                                     "asked-for cell could not be translated (the SQL then lacks it).")
+    sql.add_argument("workbook", type=Path)
+    sql.add_argument("--sheet", help="the sheet to answer for (default: the whole workbook)")
+    sql.add_argument("--range", dest="range",
+                     help="an A1 rectangle on --sheet, like D2:D1000 (default: all of it)")
+    sql.add_argument("--out", type=Path, help="write the SQL to this file instead of stdout")
+    sql.add_argument("--stats", action="store_true", help="print how much SQL was needed to stderr")
     args = parser.parse_args(argv)
+    if args.command == "sql":
+        return _sql(args)
 
     try:
         book = load(args.workbook)
