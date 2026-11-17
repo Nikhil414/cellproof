@@ -16,11 +16,11 @@ bug. Output: `REPORT.md` / `report.json` and a dbt project that runs exactly the
 
 | What | State |
 |---|---|
-| PyPI | **1.0.0** is the latest release (`pip install cellproof`), published 2026-11-17 from tag `v1.0.0` (trusted publishing; the wheel was installed from PyPI in a clean venv and converted `examples/functions.xlsx` with the same 74/0/2 verdicts) |
-| `main` | **1.0.0**: the Postgres target, the dbt-postgres project, the browser playground and the console triage (ranked unresolved reasons, wrong answers other cells read). Tag `v1.0.0` = merge `180d3e1` (squash of [PR #8](https://github.com/Nikhil414/cellproof/pull/8)) |
-| Release | [v1.0.0](https://github.com/Nikhil414/cellproof/releases/tag/v1.0.0), 2026-11-17: 13/13 CI checks green on the release commit, `publish.yml` built and uploaded the sdist and wheel to PyPI, the playground redeployed. 1.0 is the second announcement after the 2026-11-10 launch |
+| PyPI | **1.1.0** is the latest release (`pip install cellproof`), published 2026-11-17 from tag `v1.1.0` (trusted publishing) |
+| `main` | **1.1.0**: `cellproof sql` (a runnable DuckDB script for a selection of cells, PR #19), `cellproof watch` (re-verify on every save, print only what changed, PR #20). Tag `v1.1.0` = the release commit |
+| Release | [v1.1.0](https://github.com/Nikhil414/cellproof/releases/tag/v1.1.0), 2026-11-17: 13/13 CI checks green, `publish.yml` publishes to PyPI. 1.0.0 ([v1.0.0](https://github.com/Nikhil414/cellproof/releases/tag/v1.0.0), 2026-11-17) added the Postgres target, dbt-postgres, the playground and the console triage |
 | Playground | Live at https://nikhil414.github.io/cellproof/ (GitHub Pages, deployed by `.github/workflows/pages.yml` on every push to `main` that touches `src/`, `playground/` or the example) |
-| Tests | `main` + 1.1 (`cellproof sql`, `cellproof watch`): **622 pass, 3 skip** with dbt-postgres installed (2026-11-17; the 3 skips are the optional `compute` extra and the opt-in 200k benchmark). 1.0.0 alone: 563 pass, 3 skip |
+| Tests | `main` (1.1.0: `cellproof sql`, `cellproof watch`): **622 pass, 3 skip** with dbt-postgres installed (2026-11-17; the 3 skips are the optional `compute` extra and the opt-in 200k benchmark). 1.0.0 alone: 563 pass, 3 skip |
 | CI | `tests` workflow: Windows/macOS/Linux x Python 3.10-3.13, plus the `postgres` job (Postgres 16 service, Postgres tests and `dbt build`): **13 checks** on every pull request. Green on the release commit |
 | Public test workbooks (85) | **11,080 PASS / 16 FAIL / 37,814 UNRESOLVED**, identical on DuckDB 2.0, on DuckDB 1.2 (the playground) and on Postgres (with `dbt build` passing for all 85). The 16 FAIL are explained below. A fresh re-download of the corpus on 2026-11-15 (the source repos changed; 66 files now) measured **13,043 PASS / 34 FAIL / 19,183 UNRESOLVED** — one workbook (formulas' `test.xlsx`, a function catalog) holds 17,454 of the UNRESOLVED, and `CONVERT` alone 3,593 (19%). Of the 34 FAIL, 19 were wrong error codes from PR #7's base conversions ([issue #10](https://github.com/Nikhil414/cellproof/issues/10)), 9 are the known LibreOffice drift in `INFORMATION.xlsx`/`SQRT.xlsx`; 6 are the known npv float cells; the 19 error codes were fixed the same day (PR #12), bringing the fresh-corpus count to **13,062 PASS / 15 FAIL**. 2026-11-15: the six base cross-pairs (HEX2BIN/HEX2OCT/BIN2HEX/BIN2OCT/OCT2HEX/OCT2BIN, semantics verified against Excel-saved values in `test.xlsx`) turned **669** more cells PASS: fresh corpus now **13,732 PASS / 15 FAIL / 18,513 UNRESOLVED**, 0 FAILs on `BASES.xlsx` and `test.xlsx` |
 | Contributors | Open: PR #5 (overflow, changes requested). Merged: PR #7 (DEC2BIN/HEX/OCT and back, MilindLate, 2026-11-13, closes #2; unverified cases guarded, never guessed), PR #9 (`--stats` flag: count-sorted tally of UNRESOLVED reasons on the console, 2026-11-15), PR #12 (base conversions: match real Excel's error codes, closes #10, 2026-11-15), PR #15 (the six base cross-pairs, 2026-11-16, issue #14's first roadmap item), PR #17 (console triage: ranked unresolved reasons and the wrong answers other cells read, 2026-11-16), PR #8 (1.0: the Postgres target and dbt-postgres project, 2026-11-17, released as v1.0.0). Closed: PR #6 (superseded by #5). Issues #1, #3, #4, #14 open, #4 pinned; #3 has a contributor spec comment (2026-11-15: TAKE, DROP, CHOOSECOLS, CHOOSEROWS, TOCOL, TOROW against the `fn/dynamic.py` relation model); #10 was fixed in PR #12 and closed 2026-11-15; #14 is the 2.0 roadmap (ranked UNRESOLVED table) |
@@ -188,19 +188,15 @@ From Excel-saved files (`tests/test_excel_findings.py`, `tests/test_corpus_findi
 
 ## Next
 
-`main` is 1.0.0 and released. The order below is what makes it a tool people reach for daily (1.1, 1.2) before the
-function-coverage work (2.0, issue #14).
+`main` is 1.1.0 and released (`cellproof sql` in PR #19, `cellproof watch` in PR #20, both merged 2026-11-17). The
+order below is what makes it a tool people reach for daily (rest of 1.1, 1.2) before the function-coverage work
+(2.0, issue #14).
 
-1. **1.1 - day-to-day usefulness.**
-   - `cellproof sql --sheet X --range D2:D1000`: print the SQL for a range without running the whole book - the
-     question "what did it make of this column?" a data person asks first. **Done** (`src/cellproof/query.py`,
-     `tests/test_sql.py`, `tests/test_cli.py`; README "One cell's answer, as SQL").
-   - `cellproof watch book.xlsx`: re-verify on every save and print only what changed (new FAILs, new UNRESOLVED
-     reasons, verdicts that flipped), so editing the workbook and watching the SQL stay honest is one loop.
-     **Done** (`src/cellproof/watch.py`, `tests/test_watch.py`, CLI `watch` subcommand with `--interval`/`--runs`;
-     README "Editing while watching").
+1. **Rest of 1.1 - day-to-day usefulness.**
    - Optional `[fast]` read path (a second, faster loader) plus a published benchmark on a real workbook, since
-     "really, really fast conversion" is the positioning and `openpyxl` twice is the floor today.
+     "really, really fast conversion" is the positioning and `openpyxl` twice is the floor today. Measured so far
+     (2026-11-17): a synthetic 80k-cell workbook loads in 0.5 s, 77% of it inside openpyxl's two full loads
+     (non-read-only, `ws._cells`); a direct-XML single pass over the sheet XML is the candidate.
 2. **1.2 - trust.**
    - `cellproof prove book.xlsx`: a self-contained proof bundle (the workbook's hash, cellproof's version, the SQL
      for every cell, Excel's saved value, the result, and the report), so a converted model can be audited later

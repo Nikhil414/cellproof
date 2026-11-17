@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 (unreleased)
+## 1.1.0 (2026-11-17)
 
 - **`cellproof watch book.xlsx [--interval SECONDS] [--runs N]`:** verify the workbook, then verify again on every
   save and print only what changed - cells that broke or were fixed (with both values or the reason), FAILs whose
