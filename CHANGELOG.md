@@ -2,6 +2,13 @@
 
 ## 1.1.0 (unreleased)
 
+- **`cellproof watch book.xlsx [--interval SECONDS] [--runs N]`:** verify the workbook, then verify again on every
+  save and print only what changed - cells that broke or were fixed (with both values or the reason), FAILs whose
+  SQL answer moved, FAIL<->UNRESOLVED flips, rows added to or removed from a formula column, and new unresolved
+  reasons counted so a new unsupported function is visible at once. It watches the file's modification time and size
+  (default check every 1.0 s; Ctrl+C to stop); the first run prints the counts and where to start like `convert`
+  does. A workbook that cannot be read while you watch is not an error (Excel may still be writing it): the last
+  result is kept and the next save is another chance. A workbook that cannot be read at all exits 2.
 - **`cellproof sql book.xlsx [--sheet X] [--range D2:D1000] [--out FILE]`:** prints a runnable DuckDB script for a
   selection of cells instead of writing a whole dbt project. The workbook is compiled as usual, then everything the
   selection does not need is dropped: only the input cells the formulas read, the formula batches they depend on (in

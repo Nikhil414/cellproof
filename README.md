@@ -84,6 +84,7 @@ cellproof convert book.xlsx --out out_dir   # choose the folder
 cellproof convert book.xlsx --dbt           # also run `dbt build` on the generated project
 cellproof convert book.xlsx --stats         # print the unresolved cells' reasons, most common first
 cellproof sql book.xlsx --sheet Sales --range D2:D1000   # the SQL for those cells only
+cellproof watch book.xlsx                  # verify again on every save; print only what changed
 cellproof convert book.xlsx --target postgres            # verify on Postgres too (see below)
 ```
 
@@ -120,6 +121,22 @@ It answers exactly what `cellproof convert` would compute for those cells. A cel
 in the script (nothing could read it anyway); the reason is printed to stderr, ranked, and the command exits 1, so a
 piped script never quietly loses a cell. Without `--sheet` the whole workbook is the selection (hidden array-constant
 sheets are left out).
+
+### Editing while watching
+
+`cellproof watch book.xlsx` verifies the workbook once, then verifies again on every save (it watches the file's
+modification time and size, `--interval` seconds between checks, Ctrl+C to stop) and prints only what changed:
+
+- **broke / fixed**: a cell's verdict changed between PASS and FAIL or UNRESOLVED, with both values or the reason.
+- **still FAIL**: the cell was already failing and the SQL answer moved.
+- **changed**: a FAIL became UNRESOLVED or the other way round (the translation changed what can be said, not the
+  answer).
+- **new cells / cells gone**: rows added to or removed from a formula column.
+- **new unresolved reasons**, counted, so a new unsupported function is visible at once.
+
+The first run also prints the counts and where to start, like `convert` does on the console. A workbook that cannot
+be read is not an error while you watch: Excel may still be writing it, the last result is kept and the next save is
+another chance.
 
 ### On Postgres
 

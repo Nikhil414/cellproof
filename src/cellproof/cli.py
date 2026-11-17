@@ -1,8 +1,10 @@
-"""cellproof convert WORKBOOK [--out DIR] [--dbt] | cellproof sql WORKBOOK [--sheet S] [--range A1:A9] [--out FILE]"""
+"""cellproof convert WORKBOOK [--out DIR] [--dbt] | cellproof sql WORKBOOK [--sheet S] [--range A1:A9] [--out FILE]
+| cellproof watch WORKBOOK [--interval SECONDS]"""
 from __future__ import annotations
 
 import argparse
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -14,6 +16,7 @@ from cellproof.query import QueryError, build, check, selection
 from cellproof.reader import UnreadableWorkbook, load
 from cellproof.report import readers_text, write_report
 from cellproof.verifier import SqlFailed, verify_book
+from cellproof.watch import Run, run_watch
 
 
 def _value(value) -> str:
@@ -78,6 +81,38 @@ def _sql(args) -> int:
     return 1 if answer.unresolved else 0
 
 
+def _watch(args) -> int:
+    """`cellproof watch`: verify the workbook, then verify again on every save, printing only what changed."""
+    path = args.workbook
+
+    def rerun():
+        started = time.monotonic()
+        try:
+            book = load(path)
+            book, computed, why = fill_missing(book, path)
+
+            def compile_fn(b):
+                compiled = compile_book(b)
+                if why:
+                    compiled.unresolved.update({k: f"{r} ({why})" for k, r in compiled.unresolved.items()
+                                                if r == NO_VALUE})
+                return compiled
+
+            compiled, verdicts, failures = verify_book(book, compile_fn)
+            for failure in failures:  # those cells are UNRESOLVED; the run goes on
+                print(f"error: {failure}", file=sys.stderr)
+            counts = Counter({"PASS": 0, "FAIL": 0, "UNRESOLVED": 0})
+            counts.update(v.status for v in verdicts)
+            return Run(counts, {v.key: v for v in verdicts}, time.monotonic() - started,
+                       impact(compiled.chains, verdicts), wrong(book, verdicts))
+        except Exception as err:  # an unreadable workbook is normal here (Excel is still saving); keep watching
+            first = str(err).strip().splitlines()[0] if str(err).strip() else repr(err)
+            print(f"error: {first}", file=sys.stderr)
+            return None
+
+    return run_watch(path, args.interval, args.runs, rerun, err=lambda line: print(line, file=sys.stderr))
+
+
 def _write_sql(text: str) -> None:
     """The SQL as UTF-8 bytes: sheet names and text values can hold any character, and a console encoding that
     cannot print them (Windows' cp1252, or an ASCII redirect) must replace them - a replaced sheet name would make
@@ -116,9 +151,22 @@ def main(argv: list[str] | None = None) -> int:
                      help="an A1 rectangle on --sheet, like D2:D1000 (default: all of it)")
     sql.add_argument("--out", type=Path, help="write the SQL to this file instead of stdout")
     sql.add_argument("--stats", action="store_true", help="print how much SQL was needed to stderr")
+    watch = sub.add_parser("watch", help="verify again on every save; print only what changed",
+                           description="Verify the workbook, then check the file and verify again on every save, "
+                                       "printing only what changed between runs: cells that broke or were fixed, "
+                                       "new FAILs, verdicts that flipped, new unresolved reasons. Runs until Ctrl+C.")
+    watch.add_argument("workbook", type=Path)
+    watch.add_argument("--interval", type=float, default=1.0, help="seconds between checks (default: 1.0)")
+    watch.add_argument("--runs", type=int, help="stop after this many re-runs (default: until Ctrl+C)")
     args = parser.parse_args(argv)
     if args.command == "sql":
         return _sql(args)
+    if args.command == "watch":
+        try:
+            return _watch(args)
+        except KeyboardInterrupt:  # Ctrl+C is how a watcher ends: not an error
+            print("", file=sys.stderr)
+            return 0
 
     try:
         book = load(args.workbook)

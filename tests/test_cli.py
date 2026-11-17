@@ -282,3 +282,21 @@ def test_sql_keeps_non_ascii_values_exact(tmp_path, capsys):
     assert captured.out.isascii() is False
     rows = duckdb.connect().execute(captured.out).fetchall()
     assert rows == [("Verkäufe", 1, 1, "s", None, "café — 10€"), ("Verkäufe", 2, 1, "n", 10.0, None)]
+
+
+def test_watch_prints_the_baseline_and_stops(tmp_path, capsys):
+    """--runs 0: one run, the counts, where to start, and no polling."""
+    wb = _sql_book(tmp_path)
+    assert main(["watch", str(wb), "--runs", "0"]) == 0
+    out = capsys.readouterr().out
+    assert "watching" in out
+    assert "pass" in out and "unresolved" in out  # the counts line
+    assert "BESSELJ not supported yet" in out  # where to start: the ranked unresolved reasons
+    assert out.isascii()
+
+
+def test_watch_exit_2_on_a_file_that_cannot_be_read(tmp_path, capsys):
+    assert main(["watch", str(tmp_path / "missing.xlsx"), "--runs", "0"]) == 2
+    err = capsys.readouterr().err
+    assert "could not read" in err
+    assert "error:" in err
