@@ -86,6 +86,7 @@ cellproof convert book.xlsx --stats         # print the unresolved cells' reason
 cellproof sql book.xlsx --sheet Sales --range D2:D1000   # the SQL for those cells only
 cellproof watch book.xlsx                  # verify again on every save; print only what changed
 cellproof convert book.xlsx --target postgres            # verify on Postgres too (see below)
+cellproof convert book.xlsx --fast         # read the workbook in one pass (same verdicts, less time)
 ```
 
 After the counts line, the console shows what to fix first: the top unresolved reasons ranked by how many cells each
@@ -138,6 +139,25 @@ The first run also prints the counts and where to start, like `convert` does on 
 be read is not an error while you watch: Excel may still be writing it, the last result is kept and the next save is
 another chance.
 
+### Reading faster
+
+`--fast` (on `convert`, `sql` and `watch`) reads each worksheet once instead of twice. Nothing new to install, no new
+dependency, and no change to what you get out:
+
+```bash
+cellproof convert book.xlsx --fast
+```
+
+On a 200,000-formula workbook the read goes from 2.40 s to 1.35 s and a whole `convert` from 5.32 s to 4.45 s; the
+85 public test workbooks together read in 0.51 s instead of 0.85 s. The verdicts are identical - loading is now only
+about a quarter of a conversion, so the rest of the time is compiling and verifying, not reading.
+
+The fast loader is the standard library's XML parser plus openpyxl's own parsers for everything except the cell loop,
+and `tests/test_fastread.py` checks it cell-for-cell against the openpyxl load: values, kinds, formulas, arrays,
+names, tables, merges, hyperlinks, the Mac 1904 epoch, and the errors a corrupt file raises. If it meets something it
+does not handle it does not guess: it prints one note to stderr and the file is read with openpyxl instead, so
+`--fast` can only ever be slower.
+
 ### On Postgres
 
 ```bash
@@ -166,7 +186,8 @@ computes the expected values, and the report labels them `computed` (a weaker an
 reader -> regions -> dependency graph -> compiler -> verifier -> dbt emitter -> report
 ```
 
-1. **Read** the file twice with openpyxl: the formulas, and the values Excel saved. Dates become Excel serial numbers.
+1. **Read** the workbook with openpyxl: twice for the formulas and the values Excel saved, or once with `--fast`
+   (see "Reading faster"). Dates become Excel serial numbers.
 2. **Find regions.** A block of rows where columns repeat one formula down (`=A2*1.1`, `=IF(B2>100,B2,0)`) is a
    *region*. Running totals in a region (`=C1+B2`, `=SUM($B$2:B2)`) become SQL window functions. A region compiles to
    one readable statement (`amount * 1.1 AS tax`) instead of one statement per cell.
@@ -196,7 +217,8 @@ compiles like any column pasted down.
 
 **Speed** (Windows 11 laptop, measured): a 200,000-formula workbook (four formula columns over 50,000 rows, one of them
 a running total) converts and verifies in 26 s, all PASS. 50,000 rows of VLOOKUP into a 1,000-row table: 4.6 s.
-COUNTIFS/SUMIFS with a criterion from the row run at the same speed.
+COUNTIFS/SUMIFS with a criterion from the row run at the same speed. The read is a quarter of that time and `--fast`
+cuts it by about 44% (measured on a 2024 laptop: 5.32 s -> 4.45 s for the whole conversion).
 
 ## Limitations
 

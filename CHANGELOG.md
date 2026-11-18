@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.1.1 (2026-11-18)
+
+- **`--fast`: read the workbook in one pass.** `cellproof convert`, `cellproof sql` and `cellproof watch` accept
+  `--fast`, which reads each worksheet's XML once instead of openpyxl's two full loads (formulas, then the values
+  Excel saved) and keeps only the cells cellproof needs. It is the same `Book`: on the 85 public test workbooks
+  (61,510 cells) and on a 200,000-formula workbook the fast load is **identical to the openpyxl load**, and
+  `tests/test_fastread.py` is a differential test against `reader.load` (values, kinds, formulas, arrays, names,
+  tables, merges, hyperlinks, max rows, epoch, app, and the errors a corrupt file raises).
+- **Measured:** 200,000 formula cells: read **2.40 s -> 1.35 s** (1.78x), and a full `convert` **5.32 s -> 4.45 s**.
+  The 85 public workbooks together: 0.85 s -> 0.51 s. Loading is now about a quarter of a `convert`, so the ceiling
+  for this work is real: the rest is compiling and verifying.
+- **Nothing new to install, and nothing to lose:** the loader uses the standard library's `xml.etree`, reuses
+  openpyxl's own parsers for everything except the cell loop, and adds no dependency. When it meets something it does
+  not handle it raises rather than guess, and the CLI prints one note to stderr and re-reads the file with openpyxl -
+  so `--fast` can be slower, never different. Without the flag nothing changes.
+
 ## 1.1.0 (2026-11-17)
 
 - **`cellproof watch book.xlsx [--interval SECONDS] [--runs N]`:** verify the workbook, then verify again on every

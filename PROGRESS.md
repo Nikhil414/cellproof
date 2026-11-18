@@ -16,11 +16,11 @@ bug. Output: `REPORT.md` / `report.json` and a dbt project that runs exactly the
 
 | What | State |
 |---|---|
-| PyPI | **1.1.0** is the latest release (`pip install cellproof`), published 2026-11-17 from tag `v1.1.0` (trusted publishing) |
-| `main` | **1.1.0**: `cellproof sql` (a runnable DuckDB script for a selection of cells, PR #19), `cellproof watch` (re-verify on every save, print only what changed, PR #20). Tag `v1.1.0` = the release commit |
+| PyPI | **1.1.0** is the latest release (`pip install cellproof`), published 2026-11-17 from tag `v1.1.0` (trusted publishing); **1.1.1** (`--fast`) is on `main`, awaiting its release tag |
+| `main` | **1.1.1**: `--fast` (read each worksheet once, identical `Book`), on top of 1.1.0's `cellproof sql` (PR #19) and `cellproof watch` (PR #20). Tag `v1.1.0` = the 1.1.0 release commit |
 | Release | [v1.1.0](https://github.com/Nikhil414/cellproof/releases/tag/v1.1.0), 2026-11-17: 13/13 CI checks green, `publish.yml` publishes to PyPI. 1.0.0 ([v1.0.0](https://github.com/Nikhil414/cellproof/releases/tag/v1.0.0), 2026-11-17) added the Postgres target, dbt-postgres, the playground and the console triage |
 | Playground | Live at https://nikhil414.github.io/cellproof/ (GitHub Pages, deployed by `.github/workflows/pages.yml` on every push to `main` that touches `src/`, `playground/` or the example) |
-| Tests | `main` (1.1.0: `cellproof sql`, `cellproof watch`): **622 pass, 3 skip** with dbt-postgres installed (2026-11-17; the 3 skips are the optional `compute` extra and the opt-in 200k benchmark). 1.0.0 alone: 563 pass, 3 skip |
+| Tests | `main` (1.1.1: `--fast`): **729 pass, 3 skip** with dbt-postgres installed (2026-11-18; the 3 skips are the optional `compute` extra and the opt-in 200k benchmark), including 85 parametrized differential tests that read every public workbook with both loaders and require the same `Book`. 1.1.0: 622 pass, 3 skip |
 | CI | `tests` workflow: Windows/macOS/Linux x Python 3.10-3.13, plus the `postgres` job (Postgres 16 service, Postgres tests and `dbt build`): **13 checks** on every pull request. Green on the release commit |
 | Public test workbooks (85) | **11,080 PASS / 16 FAIL / 37,814 UNRESOLVED**, identical on DuckDB 2.0, on DuckDB 1.2 (the playground) and on Postgres (with `dbt build` passing for all 85). The 16 FAIL are explained below. A fresh re-download of the corpus on 2026-11-15 (the source repos changed; 66 files now) measured **13,043 PASS / 34 FAIL / 19,183 UNRESOLVED** — one workbook (formulas' `test.xlsx`, a function catalog) holds 17,454 of the UNRESOLVED, and `CONVERT` alone 3,593 (19%). Of the 34 FAIL, 19 were wrong error codes from PR #7's base conversions ([issue #10](https://github.com/Nikhil414/cellproof/issues/10)), 9 are the known LibreOffice drift in `INFORMATION.xlsx`/`SQRT.xlsx`; 6 are the known npv float cells; the 19 error codes were fixed the same day (PR #12), bringing the fresh-corpus count to **13,062 PASS / 15 FAIL**. 2026-11-15: the six base cross-pairs (HEX2BIN/HEX2OCT/BIN2HEX/BIN2OCT/OCT2HEX/OCT2BIN, semantics verified against Excel-saved values in `test.xlsx`) turned **669** more cells PASS: fresh corpus now **13,732 PASS / 15 FAIL / 18,513 UNRESOLVED**, 0 FAILs on `BASES.xlsx` and `test.xlsx` |
 | Contributors | Open: PR #5 (overflow, changes requested). Merged: PR #7 (DEC2BIN/HEX/OCT and back, MilindLate, 2026-11-13, closes #2; unverified cases guarded, never guessed), PR #9 (`--stats` flag: count-sorted tally of UNRESOLVED reasons on the console, 2026-11-15), PR #12 (base conversions: match real Excel's error codes, closes #10, 2026-11-15), PR #15 (the six base cross-pairs, 2026-11-16, issue #14's first roadmap item), PR #17 (console triage: ranked unresolved reasons and the wrong answers other cells read, 2026-11-16), PR #8 (1.0: the Postgres target and dbt-postgres project, 2026-11-17, released as v1.0.0). Closed: PR #6 (superseded by #5). Issues #1, #3, #4, #14 open, #4 pinned; #3 has a contributor spec comment (2026-11-15: TAKE, DROP, CHOOSECOLS, CHOOSEROWS, TOCOL, TOROW against the `fn/dynamic.py` relation model); #10 was fixed in PR #12 and closed 2026-11-15; #14 is the 2.0 roadmap (ranked UNRESOLVED table) |
@@ -124,6 +124,19 @@ public files did not.
 | COUNTIFS per row (`">"&A2`, 2 criteria), 1k rows | verify 29.0 s, 500 batches | verify 0.1 s, 1 batch |
 | SUMIFS / COUNTIFS per row, 50k rows | - | verify 0.6-0.8 s; compile 8.7-9.5 s |
 
+The read path (measured 2026-11-18 on a 2024 Apple laptop, Python 3.12, openpyxl 3.1.5, medians of 3):
+
+| Workload | openpyxl (two-pass) | `--fast` (one pass) | |
+|---|---|---|---|
+| 200,000 formula cells, 14.6 MB | 2.40 s | 1.35 s | 1.78x |
+| the same workbook, `convert` end to end | 5.32 s | 4.45 s | 1.20x |
+| the 85 public workbooks, 61,510 cells | 0.85 s | 0.51 s | 1.68x |
+
+Loading is now about a quarter of a conversion, so the read path is no longer where the time goes; compiling and
+verifying are. The loader is the standard library's `xml.etree` plus openpyxl's own parsers for everything except the
+cell loop (no new dependency), and is required to produce a `Book` identical to `reader.load`'s, which 85 corpus
+differential tests check.
+
 Playground (Chromium): the example converts in 3.3 s; a 23,313-cell workbook in about 60 s with the CLI's exact
 verdicts. Startup is 2.5-3.5 s on a good connection (Pyodide from jsDelivr, DuckDB from jsDelivr checked by SHA-256,
 the site's own copy as fallback); on a network that crawls on github.io it took minutes.
@@ -188,24 +201,19 @@ From Excel-saved files (`tests/test_excel_findings.py`, `tests/test_corpus_findi
 
 ## Next
 
-`main` is 1.1.0 and released (`cellproof sql` in PR #19, `cellproof watch` in PR #20, both merged 2026-11-17). The
-order below is what makes it a tool people reach for daily (rest of 1.1, 1.2) before the function-coverage work
-(2.0, issue #14).
+`main` is 1.1.1 and about to be released: 1.1.0 (`cellproof sql` in PR #19, `cellproof watch` in PR #20, merged
+2026-11-17) plus `--fast`, the one-pass read path, which closes the last item of "Rest of 1.1". The order below is
+what makes it a tool people reach for daily (remaining 1.2) before the function-coverage work (2.0, issue #14).
 
-1. **Rest of 1.1 - day-to-day usefulness.**
-   - Optional `[fast]` read path (a second, faster loader) plus a published benchmark on a real workbook, since
-     "really, really fast conversion" is the positioning and `openpyxl` twice is the floor today. Measured so far
-     (2026-11-17): a synthetic 80k-cell workbook loads in 0.5 s, 77% of it inside openpyxl's two full loads
-     (non-read-only, `ws._cells`); a direct-XML single pass over the sheet XML is the candidate.
-2. **1.2 - trust.**
+1. **1.2 - trust.**
    - `cellproof prove book.xlsx`: a self-contained proof bundle (the workbook's hash, cellproof's version, the SQL
      for every cell, Excel's saved value, the result, and the report), so a converted model can be audited later
      without trusting the machine that ran it.
    - Stale-cached-value detection: a formula cell whose saved value does not match its formula (Excel never
      recalculated after an edit) - today those read as FAILs, which teaches people to ignore FAILs.
    - `cellproof diff old.xlsx new.xlsx`: what changed between two versions of a workbook, and which SQL cells moved.
-3. **Merge PR #5** (overflow as `#NUM!`) once its measurements are in - the last known-wrong-answer gap.
-4. **2.0 roadmap (issue #14), in order** (the cross-pairs landed first, PR #15):
+2. **Merge PR #5** (overflow as `#NUM!`) once its measurements are in - the last known-wrong-answer gap.
+3. **2.0 roadmap (issue #14), in order** (the cross-pairs landed first, PR #15):
    - **TTEST / T.TEST** — 384 UNRESOLVED cells, and **every** TTEST formula in the corpus sits inside an **array
      (CSE) block** (`test.xlsx` holds 17 `<f t="array">` blocks such as
      `TTEST(C37:D38,E35:E38,{1;2;1;2;1;2},{1;2;3;1;2;3})`, each spilling 6 rows). So this needs the
@@ -214,8 +222,8 @@ order below is what makes it a tool people reach for daily (rest of 1.1, 1.2) be
      UNRESOLVED, then implement only what is proven.
    - `CONVERT` (3,593 cells) stays the contributor-bait item (the largest single reason in the corpus).
    - `CHAR` > 127 from a Mac-calculated file stays honest UNRESOLVED.
-5. TAKE/DROP/CHOOSECOLS/CHOOSEROWS/TOCOL/TOROW (issue #3).
-6. More real analyst workbooks: each one found gaps the public files did not.
-7. Other warehouses through the same translation path as Postgres (ask launch users which one).
-8. Plan 3: an AI retry loop for failed cells (it sees formula structure only, never values), every answer still
+4. TAKE/DROP/CHOOSECOLS/CHOOSEROWS/TOCOL/TOROW (issue #3).
+5. More real analyst workbooks: each one found gaps the public files did not.
+6. Other warehouses through the same translation path as Postgres (ask launch users which one).
+7. Plan 3: an AI retry loop for failed cells (it sees formula structure only, never values), every answer still
    verified against Excel.

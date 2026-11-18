@@ -8,15 +8,31 @@ import time
 from collections import Counter
 from pathlib import Path
 
+from cellproof import fastread, reader
 from cellproof.compiler import NO_VALUE, compile_book
 from cellproof.compute import fill_missing
 from cellproof.emitter import run_dbt, write_project
 from cellproof.impact import impact, wrong
 from cellproof.query import QueryError, build, check, selection
-from cellproof.reader import UnreadableWorkbook, load
+from cellproof.reader import SUPPORTED, UnreadableWorkbook, load
 from cellproof.report import readers_text, write_report
 from cellproof.verifier import SqlFailed, verify_book
 from cellproof.watch import Run, run_watch
+
+
+def _load(args):
+    """The workbook, read with the fast loader when --fast, or with openpyxl when that loader cannot.
+
+    The fast loader reads each worksheet once instead of twice, and raises UnreadableWorkbook rather than guess
+    when it meets something it does not handle; openpyxl then reads the file, so --fast can only be slower."""
+    path = Path(args.workbook)
+    if not getattr(args, "fast", False) or path.suffix.lower() not in SUPPORTED:
+        return load(path)
+    try:
+        return fastread.load(path)
+    except UnreadableWorkbook as err:
+        print(f"note: openpyxl is reading {path.name} instead ({err})", file=sys.stderr)
+    return load(path)
 
 
 def _value(value) -> str:
@@ -41,7 +57,7 @@ def _sql(args) -> int:
     """`cellproof sql`: compile the whole workbook, print only what the selection needs. SQL to stdout, the reasons
     an asked-for cell is missing to stderr, so `cellproof sql book.xlsx > run.sql` yields a file you can run."""
     try:
-        book = load(args.workbook)
+        book = _load(args)
     except UnreadableWorkbook as err:
         print(f"error: {err}", file=sys.stderr)
         return 2
@@ -88,7 +104,7 @@ def _watch(args) -> int:
     def rerun():
         started = time.monotonic()
         try:
-            book = load(path)
+            book = _load(args)
             book, computed, why = fill_missing(book, path)
 
             def compile_fn(b):
@@ -135,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
     convert = sub.add_parser("convert", help="convert a workbook and verify every formula cell")
     convert.add_argument("workbook", type=Path)
     convert.add_argument("--out", type=Path, help="output folder (default: <workbook>_dbt next to the file)")
+    convert.add_argument("--fast", action="store_true",
+                         help="read with the single-pass loader (falls back to openpyxl if it cannot)")
     convert.add_argument("--dbt", action="store_true", help="also run `dbt build` on the result")
     convert.add_argument("--target", choices=["duckdb", "postgres"], default="duckdb",
                          help="verify on DuckDB (default) or also on Postgres (needs: pip install cellproof[postgres])")
@@ -146,6 +164,8 @@ def main(argv: list[str] | None = None) -> int:
                                      "they read, the formulas in between, and a final SELECT. Exit 1 when an "
                                      "asked-for cell could not be translated (the SQL then lacks it).")
     sql.add_argument("workbook", type=Path)
+    sql.add_argument("--fast", action="store_true",
+                     help="read with the single-pass loader (falls back to openpyxl if it cannot)")
     sql.add_argument("--sheet", help="the sheet to answer for (default: the whole workbook)")
     sql.add_argument("--range", dest="range",
                      help="an A1 rectangle on --sheet, like D2:D1000 (default: all of it)")
@@ -156,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
                                        "printing only what changed between runs: cells that broke or were fixed, "
                                        "new FAILs, verdicts that flipped, new unresolved reasons. Runs until Ctrl+C.")
     watch.add_argument("workbook", type=Path)
+    watch.add_argument("--fast", action="store_true",
+                       help="read with the single-pass loader (falls back to openpyxl if it cannot)")
     watch.add_argument("--interval", type=float, default=1.0, help="seconds between checks (default: 1.0)")
     watch.add_argument("--runs", type=int, help="stop after this many re-runs (default: until Ctrl+C)")
     args = parser.parse_args(argv)
@@ -169,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     try:
-        book = load(args.workbook)
+        book = _load(args)
     except UnreadableWorkbook as err:
         print(f"error: {err}", file=sys.stderr)
         return 2
