@@ -131,3 +131,69 @@ def test_corpus_findings_for_sortby_filter_and_xmatch(tmp_path):
         "N3": ('=_xlfn.XMATCH("ss",{1,"ß"},0)', 2.0),
     })
     assert set(bad) == {("S", 1, 14), ("S", 3, 14)} and all(v[0] == "UNRESOLVED" for v in bad.values())
+
+
+def test_take_and_drop(tmp_path):
+    _, bad = check(tmp_path, {
+        **spill("J1", "_xlfn.TAKE(A2:C5,2)", [["Asha", "West", 80.0], ["Ravi", "East", 40.0]]),
+        **spill("J3", "_xlfn.TAKE(A2:C5,2,2)", [["Asha", "West"], ["Ravi", "East"]]),
+        **spill("J5", "_xlfn.TAKE(A2:C5,,1)", [["Asha"], ["Ravi"], ["Mina"], ["Vikram"]]),
+        **spill("J9", "_xlfn.DROP(A2:C5,2)", [["Mina", "west", 60.0], ["Vikram", "North", 40.0]]),
+        **spill("J11", "_xlfn.DROP(A2:C5,2,1)", [["west", 60.0], ["North", 40.0]]),
+        **spill("J13", "_xlfn.DROP(A2:C5,,2)", [[80.0], [40.0], [60.0], [40.0]]),
+        # Negative counts and zero count (#CALC!)
+        **spill("N1", "_xlfn.TAKE(A2:C5,-2)", [["Mina", "west", 60.0], ["Vikram", "North", 40.0]]),
+        **spill("N3", "_xlfn.TAKE(A2:C5,,-1)", [[80.0], [40.0], [60.0], [40.0]]),
+        **spill("N7", "_xlfn.TAKE(A2:C5,-1,-2)", [["North", 40.0]]),
+        **spill("N8", "_xlfn.TAKE(A2:C5,0)", [["#CALC!"]]),
+        **spill("R1", "_xlfn.DROP(A2:C5,-2)", [["Asha", "West", 80.0], ["Ravi", "East", 40.0]]),
+        **spill("R3", "_xlfn.DROP(A2:C5,,-1)", [["Asha", "West"], ["Ravi", "East"], ["Mina", "west"], ["Vikram", "North"]]),
+        **spill("R7", "_xlfn.DROP(A2:C5,0)", [["#CALC!"]]),
+    })
+    assert bad == {}
+
+
+def test_chooserows_and_choosecols(tmp_path):
+    _, bad = check(tmp_path, {
+        **spill("J1", "_xlfn.CHOOSEROWS(A2:C5,4,1)", [["Vikram", "North", 40.0], ["Asha", "West", 80.0]]),
+        **spill("J3", "_xlfn.CHOOSEROWS(A2:C5,2,2)", [["Ravi", "East", 40.0], ["Ravi", "East", 40.0]]),
+        **spill("J5", "_xlfn.CHOOSECOLS(A2:C5,3,1)", [[80.0, "Asha"], [40.0, "Ravi"], [60.0, "Mina"], [40.0, "Vikram"]]),
+        **spill("J9", "_xlfn.CHOOSECOLS(A2:C5,2)", [["West"], ["East"], ["west"], ["North"]]),
+        **spill("J13", "_xlfn.CHOOSEROWS(A2:C5,10)", [["#VALUE!"]]),
+        **spill("J14", "_xlfn.CHOOSECOLS(A2:C5,5)", [["#VALUE!"]]),
+        # Negative indices count from end, zero and out-of-bounds return #VALUE!
+        **spill("N1", "_xlfn.CHOOSEROWS(A2:C5,-1)", [["Vikram", "North", 40.0]]),
+        **spill("N2", "_xlfn.CHOOSEROWS(A2:C5,-2,-1)", [["Mina", "west", 60.0], ["Vikram", "North", 40.0]]),
+        **spill("N4", "_xlfn.CHOOSECOLS(A2:C5,-1)", [[80.0], [40.0], [60.0], [40.0]]),
+        **spill("N8", "_xlfn.CHOOSECOLS(A2:C5,-3,-1)", [["Asha", 80.0], ["Ravi", 40.0], ["Mina", 60.0], ["Vikram", 40.0]]),
+        **spill("N12", "_xlfn.CHOOSEROWS(A2:C5,0)", [["#VALUE!"]]),
+        **spill("N13", "_xlfn.CHOOSECOLS(A2:C5,0)", [["#VALUE!"]]),
+        **spill("N14", "_xlfn.CHOOSEROWS(A2:C5,-10)", [["#VALUE!"]]),
+        **spill("N15", "_xlfn.CHOOSECOLS(A2:C5,-10)", [["#VALUE!"]]),
+    })
+    assert bad == {}
+
+
+def test_tocol_and_torow(tmp_path):
+    _, bad = check(tmp_path, {
+        **spill("J1", "_xlfn.TOCOL(A2:B3)", [["Asha"], ["West"], ["Ravi"], ["East"]]),
+        **spill("J5", "_xlfn.TOCOL(A2:B3,,TRUE)", [["Asha"], ["Ravi"], ["West"], ["East"]]),
+        **spill("J9", "_xlfn.TOROW(A2:B3)", [["Asha", "West", "Ravi", "East"]]),
+        **spill("J10", "_xlfn.TOROW(A2:B3,,TRUE)", [["Asha", "Ravi", "West", "East"]]),
+        **spill("J11", "_xlfn.TOCOL(G1:G3,1)", [[1.0]]),
+        **spill("J12", "_xlfn.TOROW(G1:G3,1)", [[1.0]]),
+    })
+    assert bad == {}
+
+
+def test_new_dynamic_nesting_and_aggregates(tmp_path):
+    _, bad = check(tmp_path, {
+        **spill("J1", "_xlfn.TAKE(_xlfn.CHOOSEROWS(A2:C5,4,3,2,1),2)",
+                [["Vikram", "North", 40.0], ["Mina", "west", 60.0]]),
+        **spill("J3", "_xlfn.CHOOSECOLS(_xlfn._xlws.FILTER(A2:C5,C2:C5>50),1,3)",
+                [["Asha", 80.0], ["Mina", 60.0]]),
+        "J5": ("=ROWS(_xlfn.TAKE(A2:C5,2))", 2.0),
+        "J6": ("=COLUMNS(_xlfn.CHOOSECOLS(A2:C5,3,1))", 2.0),
+        "J7": ("=SUM(_xlfn.TOCOL(C2:C3))", 120.0),
+    })
+    assert bad == {}
