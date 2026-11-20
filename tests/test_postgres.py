@@ -87,10 +87,29 @@ def test_rounding_ties_go_away_from_zero_on_postgres(con):
     "string_split('ab cD-éx', ''))), lambda x: CASE WHEN regexp_matches(x[2], '\\p{L}') THEN lower(x[1]) "
     "ELSE upper(x[1]) END), '') AS v",                       # PROPER
     "SELECT len(string_split('', '')) AS v",                 # '' splits into ['']
+    "SELECT printf('%.2f', 1234.5678) AS v",                 # TEXT(x, "0.00")
+    "SELECT printf('%.0f', 0.5) AS v",                       # ties to even, as C
+    "SELECT printf('%.3e', 1234.5678) AS v",
+    "SELECT printf('%.4g', 1234.5678) AS v",
+    "SELECT printf('%.2f', -0.004) AS v",                    # -0.00, the sign kept
+    "SELECT format('{:,.2f}', 1234.5678) AS v",              # TEXT(x, "#,##0.00"): grouped
+    "SELECT format('{:,.0f}', 1235.5) AS v",                 # grouped, ties to even
+    "SELECT format('{:,.2f}', -0.004) AS v",
+    "SELECT format('{:,.1f}', 1234567.0) AS v",
 ])
 def test_rewrites_match_duckdb(con, sql):
     import duckdb
     assert con.execute(postgres.translate(sql)).fetchall()[0][0] == duckdb.sql(sql).fetchall()[0][0]
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT format('{}', 1) AS v",              # Postgres's FORMAT would return '{}': a wrong value, so no pass-through
+    "SELECT format('{:s}', 'x') AS v",
+    "SELECT printf('%s', 'x') AS v",
+])
+def test_a_format_pattern_cellproof_does_not_write_is_untranslatable(sql):
+    with pytest.raises(postgres.Untranslatable):
+        postgres.translate(sql)
 
 
 def test_proper_verifies_on_postgres(con):
@@ -122,6 +141,7 @@ DBT_BOOK = {"S": {
     "A1": 10.0, "A2": 20.0, "A3": 30.0,
     "B1": ("=A1*1.5", 15.0), "B2": ("=A2*1.5", 30.0), "B3": ("=A3*1.5", 45.0),
     "C1": ("=MOD(A1,3)", 1.0), "C2": ('=TEXT(A2/3,"0.00")', "6.67"), "C3": ('="{"&A3&"}"', "{30}"),
+    "D2": ('=TEXT(A3*1000,"#,##0.00")', "30,000.00"),
     "E1": ("=SUM(B1:B3)/0", "#DIV/0!"),
 }}
 
@@ -186,7 +206,7 @@ def test_cli_target_postgres_with_dbt(tmp_path, capsys):
     write_xlsx(wb, DBT_BOOK)
     assert main(["convert", str(wb), "--out", str(tmp_path / "out"), "--target", "postgres", "--dbt"]) == 0
     printed = capsys.readouterr().out
-    assert "7 pass, 0 fail, 0 unresolved" in printed and "dbt build: ok" in printed
+    assert "8 pass, 0 fail, 0 unresolved" in printed and "dbt build: ok" in printed
     assert "type: postgres" in (tmp_path / "out" / "profiles.yml").read_text()
 
 

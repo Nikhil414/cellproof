@@ -15,6 +15,11 @@
   openpyxl's own parsers for everything except the cell loop, and adds no dependency. When it meets something it does
   not handle it raises rather than guess, and the CLI prints one note to stderr and re-reads the file with openpyxl -
   so `--fast` can be slower, never different. Without the flag nothing changes.
+- **Fixed: TEXT's number formats on the Postgres target.** sqlglot 30.33 parses DuckDB's `printf(...)` and
+  `format(...)` into an expression of its own, so the old rewrite missed them and Postgres ran its *own* `FORMAT` -
+  `TEXT(1234.5678,"0.00")` failed, and `TEXT(1234.5678,"#,##0.00")` would have returned the pattern itself. Both are
+  now translated to a `pg_temp` helper with DuckDB's result (grouping, ties to even, `-0.00` keeps its sign); a
+  pattern cellproof never writes is UNRESOLVED instead of a wrong value. Postgres needs **sqlglot 30.10 or newer**.
 
 ## 1.1.0 (2026-11-17)
 

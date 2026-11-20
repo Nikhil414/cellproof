@@ -32,7 +32,7 @@ dependencies = ["openpyxl>=3.1", "duckdb>=1.3"]
 dev = ["pytest>=8", "jinja2>=3.1"]
 dbt = ["dbt-duckdb>=1.8"]
 compute = ["formulas>=1.3.4,<1.4"]
-postgres = ["sqlglot>=25", "psycopg[binary]>=3.1", "pgserver>=0.1"]
+postgres = ["sqlglot>=30.10", "psycopg[binary]>=3.1", "pgserver>=0.1"]  # 30.10: the oldest the Postgres tests pass on
 dbt-postgres = ["dbt-postgres>=1.8"]
 
 [project.urls]

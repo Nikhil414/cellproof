@@ -5,6 +5,7 @@ pgserver for a Postgres of its own when no URL is given).
 """
 from __future__ import annotations
 
+import re
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -13,6 +14,8 @@ from cellproof.compiler import Compiled, batch_rows, input_rows
 from cellproof.model import Book, Key, Verdict, a1
 
 NOT_ON_PG = "not yet on Postgres"
+GROUPED = re.compile(r"\{:,\.(\d+)f\}")  # DuckDB's format('{:,.<p>f}', v): TEXT's grouped number formats, alone in a pattern
+PRINTF = re.compile(r"%\.\d+[efg]")  # DuckDB's printf with one double: TEXT's ungrouped formats, NUMBER's text
 
 
 class Untranslatable(Exception):
@@ -87,6 +90,21 @@ BEGIN
     mant := '1' || CASE WHEN p > 0 THEN '.' || repeat('0', p) ELSE '' END;
   END IF;
   RETURN neg || mant || 'e' || CASE WHEN e < 0 THEN '-' ELSE '+' END || CASE WHEN abs(e) < 10 THEN '0' ELSE '' END || abs(e)::text;
+END $$;
+
+-- DuckDB's format('{:,.<p>f}', v): <p> fraction digits, ties to even, thousands grouped by commas (-0.00 keeps its sign)
+CREATE OR REPLACE FUNCTION pg_temp.cellproof_grouped(fmt text, v double precision) RETURNS text
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE m text[] := regexp_match(fmt, '^\{:,\.(\d+)f\}$'); neg text; x text; r text; ip text; fp text;
+BEGIN
+  IF v IS NULL THEN RETURN NULL; END IF;
+  IF m IS NULL THEN RAISE EXCEPTION 'cellproof_grouped: format % not supported', fmt; END IF;
+  neg := CASE WHEN v < 0 OR (v = 0 AND float8send(v) <> float8send(0::float8)) THEN '-' ELSE '' END;
+  x := pg_temp.cellproof_exact(v);
+  r := pg_temp.cellproof_round(split_part(x, '.', 1), split_part(x, '.', 2), m[1]::int);
+  ip := split_part(r, '.', 1); fp := split_part(r, '.', 2);
+  RETURN neg || regexp_replace(ip, '(\d)(?=(\d{3})+$)', '\1,', 'g')
+              || CASE WHEN length(fp) > 0 THEN '.' || fp ELSE '' END;
 END $$;
 
 -- DuckDB's % on doubles is C's fmod: the exact remainder, with the dividend's sign. Postgres's numeric mod is exact
@@ -236,11 +254,26 @@ def _rewrite(tree):
         f = node.expression
         return f.this, [n.name for n in f.expressions]
 
+    def fmt_call(fmt, args):
+        """DuckDB's printf/format with one literal pattern and one value -> the Postgres helper with the same result.
+        Postgres has a FORMAT of its own (printf(%s) placeholders), so an untranslated pattern is a wrong value, never
+        passed through."""
+        if not (isinstance(fmt, exp.Literal) and fmt.is_string) or len(args) != 1:
+            raise Untranslatable("a format of one literal pattern and one value")
+        if GROUPED.fullmatch(fmt.this):
+            return exp.Anonymous(this="pg_temp.cellproof_grouped", expressions=[fmt, args[0]])
+        if PRINTF.fullmatch(fmt.this):
+            return exp.Anonymous(this="pg_temp.cellproof_printf", expressions=[fmt, args[0]])
+        raise Untranslatable(f"the format pattern {fmt.this} is not yet on Postgres")
+
     def visit(node):
+        if getattr(exp, "Format", None) is not None and isinstance(node, exp.Format):
+            # sqlglot 30.33 parses printf(...) and format(...) into this node; older ones keep both Anonymous
+            return fmt_call(node.this, node.expressions)
         if isinstance(node, exp.Anonymous):
             name = node.name.upper()
-            if name == "PRINTF":
-                return exp.Anonymous(this="pg_temp.cellproof_printf", expressions=node.expressions)
+            if name in ("PRINTF", "FORMAT"):  # sqlglot before 28 keeps them Anonymous (DuckDB's, in both cases)
+                return fmt_call(node.expressions[0], node.expressions[1:]) if node.expressions else node
             if name == "PRODUCT":
                 return exp.Anonymous(this="pg_temp.cellproof_product", expressions=node.expressions)
             if name == "ISFINITE":
