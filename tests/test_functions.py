@@ -79,3 +79,24 @@ def test_row_column_code_unicode_n_parity():
     assert got[("S", 8, 3)] == ("e", None, "#UNCHECKED") and got[("S", 4, 4)] == ("e", None, "#DIV/0!")
     assert [got[("S", r, 4)] for r in (5, 6, 7, 8)] == [("b", 1.0, None), ("b", 1.0, None),
                                                          ("e", None, "#VALUE!"), ("b", 1.0, None)]
+
+
+def test_readme_lists_every_registered_function():
+    """README's function list and its count must match FUNCS, or the docs drift silently (146 vs 152 in 1.1.1)."""
+    import re
+    from pathlib import Path
+
+    import cellproof.fn  # noqa: F401 - importing the package registers every function
+    from cellproof.functions import FUNCS
+
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    m = re.search(r"(\d+) Excel functions are supported: (.*?)\n\n", readme, re.S)
+    assert m, "the README's function list paragraph is gone"
+    claimed, body = int(m.group(1)), m.group(2)
+    listed = [n.strip().rstrip(".") for n in re.split(r",\s*", body)]
+    # "SINGLE (the @ operator)" names SINGLE; drop the parenthetical
+    listed = [re.sub(r"\s*\(.*?\)$", "", n) for n in listed if n]
+    assert claimed == len(FUNCS), f"README says {claimed} Excel functions, FUNCS has {len(FUNCS)}"
+    assert len(listed) == len(set(listed)), "the README lists a function twice"
+    assert set(listed) == set(FUNCS), (f"missing from the README: {sorted(set(FUNCS) - set(listed))}",
+                                      f"in the README but not registered: {sorted(set(listed) - set(FUNCS))}")
