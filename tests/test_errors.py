@@ -90,3 +90,70 @@ def test_error_codes_must_match_exactly():
     assert not matches(cell, "e", None, "#DIV/0!")
     assert not matches(cell, "n", None, None)
     assert not matches(Cell("S", 1, 1, "x", 1.0, "n"), "e", None, "#N/A")
+
+
+def test_arithmetic_overflow_in_cells_and_regions():
+    from cellproof.verifier import verify
+
+    sheet = {}
+    for row in range(1, 5):
+        sheet[f'A{row}'] = 1e308
+        for col, formula in zip('BCDEF', [f'A{row}+A{row}', f'-A{row}-A{row}',
+                                         f'A{row}*10', f'A{row}/0.1', f'A{row}^2']):
+            sheet[f'{col}{row}'] = ('=' + formula, '#NUM!')
+        sheet[f'G{row}'] = (f'=IFERROR(B{row},7)', 7)
+        sheet[f'H{row}'] = (f'=A{row}/0', '#DIV/0!')
+        sheet[f'I{row}'] = (f'=A{row}/10', 1e307)
+    book = book_of({'S': sheet})
+    for regions in (False, True):
+        compiled = compile_book(book, regions=regions)
+        assert not compiled.unresolved
+        verdicts = list(verify(book, compiled))
+        assert len(verdicts) == 32
+        assert all(v.status == 'PASS' for v in verdicts)
+
+
+def test_arithmetic_overflow_in_arrays():
+    from cellproof.verifier import verify
+
+    sheet = {'A1': 1e308, 'A2': 1e308}
+    for row, formula in enumerate(['A1:A2+A1:A2', '-A1:A2-A1:A2', 'A1:A2*10',
+                                   'A1:A2/0.1', 'A1:A2^2'], 1):
+        sheet[f'B{row}'] = (f'=SUM({formula})', '#NUM!')
+    book = book_of({'S': sheet})
+    compiled = compile_book(book)
+    assert not compiled.unresolved
+    verdicts = list(verify(book, compiled))
+    assert len(verdicts) == 5
+    assert all(v.status == 'PASS' for v in verdicts)
+
+
+def test_long_arithmetic_retains_intermediate_errors_without_expanding_sql():
+    from cellproof.compiler import batch_rows
+
+    sheet = {f'A{row}': 1 for row in range(1, 201)}
+    total = '+'.join(sheet)
+    sheet['B1'] = ('=' + total, 200)
+    sheet['B2'] = ('=Z1*10+' + total + '+1/0', '#NUM!')
+    sheet['Z1'] = 1e308
+    book = book_of({'S': sheet})
+    compiled = compile_book(book, regions=False)
+    assert not compiled.unresolved
+    assert max(len(batch_rows(b, 'inputs')) for b in compiled.batches) < 125_000
+    got = execute(book, compiled)
+    assert got[('S', 1, 2)] == ('n', 200, None)
+    assert got[('S', 2, 2)] == E('#NUM!')
+
+
+def test_overflowing_criteria_are_unresolved_without_guessing_excel_behavior():
+    from cellproof.verifier import verify
+
+    book = book_of({'S': {
+        'A1': 1e308, 'A2': 1,
+        'B1': ('=COUNTIF(A1:A2,A1*10)', 0),
+        'B2': ('=SUMIF(A1:A2,A1*10)', 0),
+        'B3': ('=IFERROR(COUNTIF(A1:A2,A1*10),7)', 7),
+        'B4': ('=COUNTIF(A1:A2,A2*1)', 1),
+    }})
+    got = {v.key: v.status for v in verify(book, compile_book(book))}
+    assert [got[('S', row, 2)] for row in range(1, 5)] == ['UNRESOLVED'] * 3 + ['PASS']
