@@ -2,6 +2,21 @@
 
 ## 1.2.0 (unreleased)
 
+- **`cellproof diff old.xlsx new.xlsx`: what changed between two versions, and what it broke.** Both workbooks are
+  verified exactly as `convert` verifies them, so every verdict is one `convert` would give. It reports, with counts:
+  cells added and removed (by A1 address), saved input values that changed with both values (including a change of
+  kind, `2` becoming `"2"`), formula texts that changed with both texts, verdicts that changed per cell with both
+  values and the reason (a new FAIL is the headline and comes first, then UNRESOLVED, then PASS; vanished cells and
+  cells that newly appear and pass are left out), and regions that verified as a block in one version and not the
+  other, with the compiler's own note. The case only a diff exists for: **a formula whose text did not change but
+  whose SQL does** - a named range that grew, a table that gained rows, a range's corner that moved. That comparison
+  comes from a second compile in cell mode, canonicalised to one text per cell (cell tags in place of batch names),
+  so a block of rows regrouping into a region - or out of one - does not read as hundreds of statements changing.
+  Cells are matched by sheet name and A1 address only: a renamed sheet reads as everything removed and everything
+  added, the truth rather than a guess at which sheet became which. `diff.json` is always written; `DIFF.md` only
+  when a verdict changed or ten changes in total, and its headline names the new FAILs and says a formula that reads
+  a wrong answer is usually wrong too - it never claims to know which to fix first. Exit 1 only when a cell that
+  passed before fails now: a difference by itself is not a failure. `--fast` works here too.
 - **FAILs are split: the ones to look at, and the ones that only read them.** A primary FAIL reads no FAIL, directly
   or through other formula cells, so the difference starts at that cell; an inherited FAIL reads one and may be
   right itself, and is attributed to the nearest primary it reaches. `REPORT.md` replaces the flat failed-cell table

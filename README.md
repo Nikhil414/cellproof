@@ -86,6 +86,7 @@ cellproof convert book.xlsx --stats         # print the unresolved cells' reason
 cellproof sql book.xlsx --sheet Sales --range D2:D1000   # the SQL for those cells only
 cellproof watch book.xlsx                  # verify again on every save; print only what changed
 cellproof prove book.xlsx                  # verify, then write a bundle someone else can check
+cellproof diff old.xlsx new.xlsx            # what changed between two versions, and what it broke
 cellproof convert book.xlsx --target postgres            # verify on Postgres too (see below)
 cellproof convert book.xlsx --fast         # read the workbook in one pass (same verdicts, less time)
 ```
@@ -183,10 +184,47 @@ The first run also prints the counts and where to start, like `convert` does on 
 be read is not an error while you watch: Excel may still be writing it, the last result is kept and the next save is
 another chance.
 
+### Comparing two versions
+
+`cellproof diff old.xlsx new.xlsx` answers the question a person actually has after editing: what changed, and did it
+break anything.
+
+```bash
+cellproof diff old.xlsx new.xlsx                  # writes new_diff/ next to the new file
+cellproof diff old.xlsx new.xlsx --out changes    # choose the folder
+```
+
+Both workbooks are verified exactly as `convert` verifies them, so the verdicts are the ones you would get from
+`convert` on each file. It then reports, with counts:
+
+- **Cells added and removed**, by A1 address.
+- **Saved input values that changed**, with both values - including a value that changed kind (`2` becoming `"2"`).
+- **Formula texts that changed**, with both texts.
+- **Formulas whose text did not change but whose SQL does**: a named range that grew, a table that gained rows, a
+  range's corner that moved. The formula looks identical in both versions and answers differently, which is the case
+  worth a diff at all. This comparison uses a second compile in cell mode, so a block of rows regrouping into a region
+  (or out of one) does not read as hundreds of statements changing.
+- **Verdicts that changed**, per cell, with both values and the reason. A new FAIL is the headline and comes first.
+- **Regions** that verified as a block in one version and not the other, with the compiler's own note saying why.
+
+```
+3 new FAILs, 1 added, 1 input value changed, 1 formula text changed, 4 verdicts changed
+  new FAIL S!B2: Excel 10.0, SQL 27.0
+  ...
+-> new_diff/diff.json and DIFF.md
+```
+
+`diff.json` is always written; `DIFF.md` only when the difference is more than a summary (any verdict change, or ten
+changes in total). Cells are matched by sheet name and A1 address only, so a renamed sheet reads as everything removed
+and everything added - the truth rather than a guess at which sheet became which.
+
+Exit code `1` when a cell that passed before fails now, `0` when it does not. A difference by itself is not a failure:
+`diff` is a question, not a gate.
+
 ### Reading faster
 
-`--fast` (on `convert`, `sql` and `watch`) reads each worksheet once instead of twice. Nothing new to install, no new
-dependency, and no change to what you get out:
+`--fast` (on `convert`, `sql`, `watch`, `prove` and `diff`) reads each worksheet once instead of twice. Nothing new
+to install, no new dependency, and no change to what you get out:
 
 ```bash
 cellproof convert book.xlsx --fast
