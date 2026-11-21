@@ -11,6 +11,9 @@ from cellproof.expr import ZERO, Expr, errs, num, num_strict
 from cellproof.functions import arity, register
 from cellproof.parser import Binary
 
+MAX_DOUBLE = "1.7976931348623157e308"  # the largest finite double, and one ulp of slack when testing a scaled value
+EPS = "2.220446049250313e-16"
+
 
 def _guarded(value: str, bad: str, code: str) -> tuple[str, str]:
     return f"(CASE WHEN NOT ({bad}) THEN {value} END)", f"(CASE WHEN {bad} THEN '{code}' END)"
@@ -84,14 +87,23 @@ def mod(c, args, sheet):
 def _digits(name: str, rnd: str):
     def fn(c, args, sheet):
         x, d = _two(c, args, sheet, name, default=ZERO if name == "TRUNC" else None)
-        p = f"power(10, trunc({d.sql}))"
-        # shortcut: scaling outside DOUBLE gives #NUM!, revisit with Excel boundary fixtures.
-        scaled = f"abs({x.sql}) * {p}"
-        ok = f"(isfinite({p}) AND {p} > 0 AND isfinite({scaled}))"
-        sql = f"(CASE WHEN {d.sql} > 308 THEN {x.sql} WHEN {ok} THEN sign({x.sql}) * {rnd}({xl15(scaled)}) / {p} END)"
-        bad = f"(CASE WHEN {d.sql} <= 308 AND NOT {ok} THEN '#NUM!' END)"
-        return Expr(sql, "num", errs(x.err, d.err, bad))
+        # shortcut: scaling outside DOUBLE gives #NUM!, revisit with Excel boundary fixtures. The magnitude is tested
+        # before the multiply: Postgres raises there where DuckDB returns inf, which lost the whole batch. p <= 1
+        # cannot overflow a double, and greatest(p, 10) is p wherever the guard is reached (trunc(d) > 0) while
+        # keeping the constant foldable when the digits are a literal (1.8e308 / 1e-5 would overflow the planner).
+        ok = (f"(isfinite(sv) AND isfinite(pv) AND pv > 0 AND (trunc(dv) <= 0 "
+              f"OR abs(sv) < {MAX_DOUBLE} / greatest(pv, 10) * (1 - {EPS})))")
+        sql = f"(CASE WHEN dv > 308 THEN sv WHEN {ok} THEN sign(sv) * {rnd}({xl15('(abs(sv) * pv)')}) / pv END)"
+        bad = f"(CASE WHEN dv <= 308 AND NOT {ok} THEN '#NUM!' END)"
+        return Expr(_bound(sql, x.sql, d.sql), "num",
+                    errs(x.err, d.err, _bound(bad, x.sql, d.sql)))
     register(name)(fn)
+
+
+def _bound(body: str, x: str, d: str) -> str:
+    """body over the value sv and the digits dv, both bound once: the value appears in five branches of ROUND, and
+    repeating it per branch made the SQL 3x larger. pv is bound too, so power() is computed once."""
+    return f"(SELECT {body} FROM (SELECT {x} AS sv, {d} AS dv, power(10, trunc({d})) AS pv) b)"
 
 
 @register("ROUND")
@@ -99,12 +111,17 @@ def round_(c, args, sheet):
     """Excel rounds the value it shows, 15 significant digits, half away from zero: ROUND(1.005, 2) is 1.01 although
     the double is 1.00499999... (binary rounding gave 1.0 before 0.6.1). Scaled, snapped to 15 digits, rounded."""
     x, d = _two(c, args, sheet, "ROUND")
-    p = f"power(10, trunc({d.sql}))"
-    scaled = f"abs({x.sql}) * {p}"
-    # a number too big to scale already has no digits there; 10^-400 underflows to 0, and so does the rounded number
-    sql = (f"(CASE WHEN {d.sql} > 308 OR NOT isfinite({scaled}) THEN {x.sql} WHEN {p} = 0 THEN CAST(0 AS DOUBLE) "
-           f"ELSE sign({x.sql}) * round({xl15(scaled)}) / {p} END)")
-    return Expr(sql, "num", errs(x.err, d.err))
+    body = f"sign(sv) * round({xl15('(abs(sv) * pv)')}) / pv"
+    # Nothing to round (digits > 308), or the nearest multiple is beyond every double (digits <= -309, since 10^309 is
+    # larger than MAX_DOUBLE): the answer is x or 0, and neither needs power(), which Postgres may turn into Infinity
+    # on underflow (10^-400) where DuckDB gives 0 - that answered 5 for ROUND(5,-400) instead of Excel's 0. Scaling is
+    # only safe while abs(x) * 10^d stays finite, and that bound is tested before the multiply: Postgres raises on the
+    # multiply, and DuckDB returns inf, where the answer is x - unless the product is finite, because
+    # ROUND(1.2345678901234567e300, 5) is not x (the 15-digit snap moves its last digits).
+    sql = (f"(CASE WHEN NOT isfinite(sv) THEN sv WHEN dv > 308 THEN sv WHEN dv <= -309 THEN CAST(0 AS DOUBLE) "
+           f"WHEN trunc(dv) <= 0 OR abs(sv) < {MAX_DOUBLE} / greatest(pv, 10) * (1 - {EPS}) THEN {body} "
+           f"ELSE sv END)")
+    return Expr(_bound(sql, x.sql, d.sql), "num", errs(x.err, d.err))
 
 
 _digits("ROUNDUP", "ceil")

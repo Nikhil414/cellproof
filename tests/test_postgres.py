@@ -139,6 +139,31 @@ def test_rounding_a_tie_at_the_text_format_on_postgres(con):
     assert {s for s, _ in got.values()} == {"PASS"}, got
 
 
+def test_rounding_at_the_double_boundary_on_postgres(con):
+    # ROUND scales with abs(x) * 10^d and guarded afterwards. Postgres raises on the multiply where DuckDB returns inf,
+    # so one such cell used to leave its whole batch ("value out of range: overflow", also as a literal, and 2.675
+    # with it); and 10^-400 underflows to 0 on DuckDB but goes through cellproof_pow to Infinity on Postgres, which
+    # returned 5 for ROUND(5,-400) instead of Excel's 0. Both are decided before scaling now.
+    book = book_of({"S": {"A1": 1e308,
+                          "B1": ("=ROUND(1E+308,2)", 1e308), "B2": ("=ROUND(A1,2)", 1e308),
+                          "B3": ("=ROUND(1E+308,0)", 1e308), "B4": ("=ROUND(5,-400)", 0.0),
+                          "B5": ("=ROUND(1.2345678901234567E+300,5)", 1.2345678901234598e300),
+                          "B6": ("=ROUND(2.675,2)", 2.68)}})
+    got = {v.key: (v.status, v.actual, v.reason) for v in postgres.verify(book, compile_book(book), con)}
+    assert {s for s, _, _ in got.values()} == {"PASS"}, got
+
+
+def test_roundup_and_trunc_at_the_boundary_keep_their_num_error_on_postgres(con):
+    # ROUNDUP/ROUNDDOWN/TRUNC scale the same way and answer #NUM! where scaling leaves DOUBLE (a shortcut the fixture
+    # records); the point is that they answer it instead of taking the batch down with an overflow, and that
+    # TRUNC(5,-400) - 10^-400 is where Postgres's power() underflowed - is 0/#NUM!, not 5.
+    book = book_of({"S": {"A1": ("=ROUNDUP(1E+308,2)", "#NUM!"), "A2": ("=TRUNC(5,-400)", "#NUM!"),
+                          "A3": ("=ROUNDDOWN(-1E+308,2)", "#NUM!"), "A4": ("=ROUNDUP(2.675,2)", 2.68),
+                          "A5": ("=TRUNC(2.675,2)", 2.67)}})
+    got = {v.key: (v.status, v.actual, v.reason) for v in postgres.verify(book, compile_book(book), con)}
+    assert {s for s, _, _ in got.values()} == {"PASS"}, got
+
+
 def test_boolean_index_and_error_spill_on_postgres(con, tmp_path):
     # formulas' test.xlsx: INDEX of a TRUE/FALSE cell read max(bool) (no such function on Postgres); a spill that is
     # one error typed its num column as text (CASE text/double mismatch)

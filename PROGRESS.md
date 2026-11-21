@@ -206,10 +206,28 @@ From Excel-saved files (`tests/test_excel_findings.py`, `tests/test_corpus_findi
   `postgres` rewrite test's `string_split('', '')` case replaced - that input's answer is now version-dependent, so
   asserting the shim equals live DuckDB on it was a test that could only pass on one version. The shim keeps the
   2.0.0 answer and is only ever reached with guarded (non-empty) text, which the new Postgres tests pin.
-- **Follow-up: `ROUND` shares the Postgres overflow trap.** `_digits`/`ROUND` scale with `abs(x) * power(10, d)` and
-  guard afterwards, and Postgres raises where DuckDB returns `inf`, so `ROUND(1e308, 2)` - also as a literal -
-  already turns every cell of its batch UNRESOLVED on `main`. Same fix as `TEXT`'s (test the magnitude before
-  scaling); left out of the drift PR to keep it a bug fix, not a behaviour change.
+- **`ROUND`/`ROUNDUP`/`ROUNDDOWN`/`TRUNC` at the double boundary (fixed 2026-11-21, after #26):** they scaled with
+  `abs(x) * power(10, d)` and guarded afterwards, and Postgres raises on that multiply where DuckDB returns `inf`, so
+  `ROUND(1e308, 2)` - also as a literal - turned every cell of its batch UNRESOLVED on `main`. Measuring the fix found
+  a second, worse bug on the same line: `power(10, -400)` underflows to `0` on DuckDB (the branch that answers `0`)
+  but is `Infinity` through `cellproof_pow` on Postgres, so **`ROUND(5,-400)` returned 5 where Excel says 0** - a wrong
+  answer on the Postgres target, not just a dead batch. Both are now decided before any scaling: a non-finite `x` is
+  passed through, digits `> 308` give `x` (`10^309` is larger than `MAX_DOUBLE`), digits `<= -309` give `0`, and the
+  product is bounded by `abs(x) < MAX_DOUBLE / greatest(p, 10) * (1 - EPS)` before the multiply. `greatest(p, 10)` is
+  `p` wherever the guard is reached (`trunc(d) > 0`) and keeps the constant foldable when the digits are a literal:
+  Postgres folds a dead `CASE` arm while planning, and `1.8e308 / 1e-5` overflows the planner (`NumericValueOutOfRange`
+  on a query whose answer is 1). The bound is tight on purpose - the whole overflow region cannot answer `x`, because
+  `ROUND(1.2345678901234567e300, 5)` is `1.2345678901234598e+300` (the 15-digit snap moves the last digits) and
+  `ROUND(1e300,-5)` is `9.999999999999999e+299`. The value, the digits and `power()` are bound once in a derived table
+  (`_bound`), so a `ROUND` cell got **smaller**: 533 chars per cell against `main`'s 632 (a 20k-cell region: 10.66M vs
+  12.64M chars, same compile and run time, 0.16 s + 0.05 s), and region mode answers cell-for-cell what cell mode does.
+  Proved equal to the old SQL two ways: 1,020 (x, digits) pairs on DuckDB 2.0.0 covering both ends of the double
+  range, subnormals, `inf`, NaN and fractional digits, 0 differences; and 805 whole cells through `compile_book` +
+  `execute` (ROUND/ROUNDUP/ROUNDDOWN/TRUNC over 35 values x 23 digit counts), identical answers old vs new.
+  `ROUNDUP`/`ROUNDDOWN`/`TRUNC` keep their `#NUM!` for an unscalable value (a documented shortcut) but answer it
+  instead of taking the batch down. Pinned by `test_rounding_at_the_double_boundary_on_postgres` and
+  `test_roundup_and_trunc_at_the_boundary_keep_their_num_error_on_postgres` - both fail on `main` and pass here - plus
+  the existing Excel-example tests in `test_maths.py`.
 - **PR #5 (overflow as #NUM!, imshah-id):** the right approach (checked per operation, so IFERROR sees it; regions,
   cells and arrays agree; results stay correct - every measured case is still PASS, so nothing here is a false PASS).
   The two 2026-11-07 requests are met: the COUNTIF/SUMIF error-criterion change is *guarded* (`_criterion_error` maps a
