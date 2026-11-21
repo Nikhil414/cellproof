@@ -22,7 +22,7 @@ from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, bool_num, any_of, compar
 from cellproof.fn.dynamic import DYNAMIC, spill_batch
 from cellproof.functions import FUNCS
 from cellproof.graph import formula_order
-from cellproof.model import Book, Cell, Key, Unsupported, a1
+from cellproof.model import Book, Cell, Key, Unsupported, a1, other_app
 from cellproof.parser import ARRAYS, Binary, Bool, Call, ErrLit, Num, Postfix, RefNode, Str, Unary, arrays, parse
 from cellproof.rangeindex import RangeIndex, field
 from cellproof.refs import Area, resolve
@@ -384,7 +384,7 @@ def compile_book(book: Book, regions: bool = True) -> Compiled:
     order, unresolved, kept = order_with_regions(book, scan.regions)
     comp = Compiler(book)
     chains: dict[Key, Key] = {}  # cell -> the unresolved cell that stopped its compile (see impact.py)
-    if book.app and not (book.app.startswith("Microsoft") and "Compatible" not in book.app):  # openpyxl: "Compatible"
+    if other_app(book):  # openpyxl writes "Compatible", which is unknown rather than somebody else (see model.py)
         comp.findings.append(f"the file was last saved by {book.app}, not Microsoft Excel: its saved values follow that "
                              "program's rules, so a FAIL can be a difference between that program and Excel")
     batches: list = []

@@ -2,6 +2,17 @@
 
 ## 1.2.0 (unreleased)
 
+- **FAILs are split: the ones to look at, and the ones that only read them.** A primary FAIL reads no FAIL, directly
+  or through other formula cells, so the difference starts at that cell; an inherited FAIL reads one and may be
+  right itself, and is attributed to the nearest primary it reaches. `REPORT.md` replaces the flat failed-cell table
+  with "Failures to look at" (primary, with how many failed cells read each) plus a line counting the inherited ones;
+  `report.json` gains a `failures` key, and `--stats` prints the two counts. Cells whose expected value came from the
+  `formulas` library have no saved value to disagree with, so they are excluded and counted separately. Nothing is
+  ever labelled stale: both kinds stay FAILs.
+- **The report quotes the file's own evidence that its saved values may be out of date.** `calcMode="manual"`, a
+  pending `fullCalcOnLoad="1"`, a missing `calcId`, or a last-saving program that is not Microsoft Excel each put one
+  sentence above the failure tables: recalculate (F9) and save in Excel, then run again. A clean Excel file gets no
+  sentence, and a file with no FAILs gets none either.
 - **`cellproof prove`: a result you can hand to someone.** It verifies the workbook as `convert` does, then writes a
   folder holding `cells.sql` (one runnable DuckDB script: the input cells, every formula batch in dependency order, a
   final `SELECT` for every cell), `report.json` and `REPORT.md` (what `convert` would have written), and `proof.json`

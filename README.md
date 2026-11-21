@@ -99,8 +99,12 @@ The output folder holds:
 - **`REPORT.md` / `report.json`**: every verdict, failed cells with both values, unresolved cells with the reason,
   findings (for example a number stored as text, which Excel skips in SUM), and which blocks of rows became readable
   table models. The unresolved reasons are ranked by how many cells depend on them ("Where to start"), so a long list
-  of unresolved cells says what to fix first. A failed cell that other formulas read is listed with its readers
-  ("Wrong answers other cells read"), because a wrong value that feeds other cells can spread.
+  of unresolved cells says what to fix first. Failures are split: "Failures to look at" lists the ones whose own
+  inputs were all right (the difference starts there), and a line says how many others read one of them and may be
+  right themselves. A failed cell that other formulas read is also listed with its readers ("Wrong answers other cells
+  read"), because a wrong value that feeds other cells can spread. When the file itself says its saved values may be
+  out of date (manual calculation, a full recalculation pending, no `calcId`, or last saved by a program that is not
+  Excel), `REPORT.md` says so above the tables: recalculate in Excel and run again before believing a FAIL.
 - **A dbt project** (`dbt_project.yml`, `models/`, `seeds/input_cells.csv`) that recomputes the workbook on DuckDB.
   It runs exactly the SQL the verifier checked.
 

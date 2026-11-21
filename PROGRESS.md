@@ -98,6 +98,7 @@ Everything was built test-first; each piece was reviewed by a fresh reviewer.
 | 1.0 (released 2026-11-17) | `postgres.verify_book` recompiles without what Postgres cannot run, so the dbt-postgres project only holds SQL that ran; helpers created in the target schema by an `on-run-start` macro; `profiles.yml` reads `CELLPROOF_PG_*`; `--dbt` builds on the Postgres that verified; CI Postgres 16 job |
 | `cellproof sql` (1.1) | a runnable DuckDB script for a selection instead of a dbt project: the input cells the formulas read, the batches they depend on in dependency order (kept or dropped whole - one batch is one statement - and closed under "reads"), then a `SELECT` for the asked-for cells. SQL to stdout, ranked reasons to stderr, exit 1 when a cell was left out. Bypasses the verifier, so it costs one compile and no DuckDB run: 0.7 s for a 20k-cell workbook, 0.4 s to run the printed script |
 | `cellproof prove` (1.2, piece 1) | verify as `convert` does, then write a bundle a stranger can check: `cells.sql` (the whole chain, one runnable DuckDB script), `report.json`, `REPORT.md`, and `proof.json` (workbook hash and size, tool versions, the workbook's own `<calcPr>` and last-saving program, counts, a hash per file and one over the set). `prove --check DIR [--workbook f]` re-hashes, optionally re-reads the workbook and compares its saved values with the report, then runs `cells.sql` on a fresh DuckDB and compares every row - exit 0/1/2/3. The seal is not a signature and `REPORT.md` says so in one line; `verifier.matches` became a wrapper over `verifier.same` so `--check` and `convert` cannot disagree about "equal" |
+| FAIL split (1.2, piece 2) | `impact.split_failures` walks the read graph once (`readers_of` with every formula's key) to mark each FAIL *primary* (reads no FAIL, so the difference starts there) or *inherited* (reads one, attributed to the nearest primary it reaches, so a three-deep chain names the first). Cells whose expected value came from the `formulas` library are excluded and counted. `REPORT.md` replaces the flat failed-cell table with "Failures to look at" plus an inherited count, `report.json` gains `failures`, `--stats` prints both; the file's own `<calcPr>`/last-saving-program evidence puts one "saved values may be out of date, recalculate in Excel" sentence above the tables, and only when there are FAILs. No verdict changes - the corpus counts do not move. Cost on the 200k benchmark: +1.0 s and ~14-33 MB when every formula fails |
 | PR #7 (merged 2026-11-13) | DEC2BIN, DEC2HEX, DEC2OCT and BIN2DEC, HEX2DEC, OCT2DEC (issue #2); hex text cast to BIGINT so DuckDB 1.2 works; cases not checked in real Excel (`HEX2DEC("")`, a negative invalid `places`) stay UNRESOLVED, never guessed |
 
 ## The public test workbooks
@@ -267,17 +268,19 @@ work (2.0, issue #14).
 
 1. **1.2 - trust.** Spec: `docs/superpowers/specs/2026-11-21-trust-design.md`. Three pieces, each its own PR, in order;
    1.2.0 is tagged after the third.
-   - **Piece 1 (done, in review): `cellproof prove book.xlsx`** - a bundle (`cells.sql`, `report.json`, `REPORT.md`,
-     `proof.json`) a stranger checks with DuckDB alone, plus `prove --check DIR [--workbook f]`, which re-hashes the
-     files, re-reads the workbook's saved values, and runs `cells.sql` against `report.json`. Exit 0/1/2/3. The seal
-     detects accidents, not forgery, and `REPORT.md` says so. `Book.calc` now carries the workbook's `<calcPr>`.
-   - **Piece 2 (next): the FAIL split.** A FAIL whose inputs were all right is a **primary** FAIL; one that reads a
-     FAIL (directly or through other formulas) is **inherited**. Today both read the same, which teaches people to
-     ignore FAILs. Plus the saved-value diagnosis: quote the file's own `<calcPr>`/`last_saved_by` evidence instead of
-     calling a cell "stale", which cannot be proven. `report.json` gains a `failures` key; no status is added.
-   - **Piece 3: `cellproof diff old.xlsx new.xlsx`** - what changed between two saves, and which SQL cells moved.
-     Verdicts come from the normal region-mode run; the SQL compared comes from a second cell-mode compile, because
-     regions may merge or split differently between the two files.
+   - **Piece 1 (merged 2026-11-21, PR #30): `cellproof prove book.xlsx`** - a bundle (`cells.sql`, `report.json`,
+     `REPORT.md`, `proof.json`) a stranger checks with DuckDB alone, plus `prove --check DIR [--workbook f]`, which
+     re-hashes the files, re-reads the workbook's saved values, and runs `cells.sql` against `report.json`. Exit
+     0/1/2/3. The seal detects accidents, not forgery, and `REPORT.md` says so. `Book.calc` carries the workbook's
+     `<calcPr>`.
+   - **Piece 2 (in review): the FAIL split.** A FAIL whose inputs were all right is a **primary** FAIL; one that reads
+     a FAIL (directly or through other formulas) is **inherited**, attributed to the nearest primary it reaches.
+     Today both read the same, which teaches people to ignore FAILs. Plus the saved-value diagnosis: quote the file's
+     own `<calcPr>`/`last_saved_by` evidence instead of calling a cell "stale", which cannot be proven.
+     `report.json` gains a `failures` key; no status is added.
+   - **Piece 3 (next): `cellproof diff old.xlsx new.xlsx`** - what changed between two saves, and which SQL cells
+     moved. Verdicts come from the normal region-mode run; the SQL compared comes from a second cell-mode compile,
+     because regions may merge or split differently between the two files.
 2. **Merge PR #5** (overflow as `#NUM!`) once the region path uses the same `BIND_SQL` binder as cell mode (cell
    mode is already bounded, e.g. 781,211 -> 164,411 chars at 200 terms) - the last known-wrong-answer gap.
 3. **2.0 roadmap (issue #14), in order** (the cross-pairs landed first, PR #15):

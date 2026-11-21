@@ -57,6 +57,17 @@ class Calc:
     calc_id: int | None = None  # the calculation engine's stamp; absent or 0 means Excel probably did not write this
 
 
+def other_app(book: Book | None) -> str:
+    """The program that last saved the file, when it is not Microsoft Excel: its saved values follow its own rules.
+
+    openpyxl writes "Compatible" rather than Excel, so that one counts as unknown, not as somebody else. Both the
+    compiler's finding and the report's warning use this, so they can never say different things."""
+    app = book.app if book is not None else ""
+    if app and not (app.startswith("Microsoft") and "Compatible" not in app):
+        return app
+    return ""
+
+
 @dataclass
 class Book:
     cells: dict[Key, Cell]

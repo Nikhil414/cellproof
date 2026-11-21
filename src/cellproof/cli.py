@@ -12,7 +12,7 @@ from cellproof import fastread, proof, reader
 from cellproof.compiler import NO_VALUE, compile_book
 from cellproof.compute import fill_missing
 from cellproof.emitter import run_dbt, write_project
-from cellproof.impact import impact, wrong
+from cellproof.impact import impact, split_failures, wrong
 from cellproof.query import QueryError, build, check, selection
 from cellproof.reader import SUPPORTED, UnreadableWorkbook, load
 from cellproof.report import readers_text, write_report
@@ -287,13 +287,18 @@ def main(argv: list[str] | None = None) -> int:
             dbt = run_dbt(out)
     groups = impact(compiled.chains, verdicts)
     wrong_answers = wrong(book, verdicts)
+    split = split_failures(book, verdicts, computed)
     counts = write_report(verdicts, compiled.findings, out, args.workbook.name, computed, compiled.notes,
-                          compiled.chains, book, groups, wrong_answers)
+                          compiled.chains, book, groups, wrong_answers, split)
     if computed:
         print(f"{len(computed)} expected values computed by the formulas library (the file had none saved)")
     print(f"{counts['PASS']} pass, {counts['FAIL']} fail, {counts['UNRESOLVED']} unresolved -> {out / 'REPORT.md'}")
     _summarise(groups, wrong_answers)
     if args.stats:
+        if counts["FAIL"]:
+            print(f"Failures: {len(split['primary']):,} to look at, {split['inherited']:,} that read one of them"
+                  + (f", {split['computed_answers_excluded']:,} excluded (expected values from the formulas library)"
+                     if split["computed_answers_excluded"] else ""))
         reasons = Counter(v.reason for v in verdicts if v.status == "UNRESOLVED")
         if reasons:
             print("Unresolved by reason (top 15):")
