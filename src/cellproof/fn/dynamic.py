@@ -21,7 +21,8 @@ from cellproof.model import Unsupported
 from cellproof.parser import Bool, Call, RefNode
 from cellproof.refs import MAX_ROW, resolve
 
-DYNAMIC = {"FILTER", "SORT", "SORTBY", "UNIQUE", "SEQUENCE"}
+DYNAMIC = {"FILTER", "SORT", "SORTBY", "UNIQUE", "SEQUENCE",
+           "TAKE", "DROP", "CHOOSECOLS", "CHOOSEROWS", "TOCOL", "TOROW"}
 MAX_ELEMENTS = 1_000_000  # SEQUENCE bigger than this is UNCHECKED and builds nothing (a crafted file's 1E9 x 1E9)
 
 
@@ -248,7 +249,253 @@ def sequence(c, args, sheet: str) -> Rel:
     return Rel(_whole(u, [], body, bad), None, None)
 
 
-BUILDERS = {"FILTER": filter_, "SORT": sort_, "SORTBY": sortby, "UNIQUE": unique_, "SEQUENCE": sequence}
+def take_(c, args, sheet: str) -> Rel:
+    """TAKE(array, [rows], [cols]): take the first rows rows (and cols cols when given)."""
+    if not 2 <= len(args) <= 3:
+        raise Unsupported("TAKE needs two or three arguments")
+    a = relation(c, args[0], sheet)
+    r = int_literal(args[1]) if args[1] is not None else None
+    if args[1] is not None and r is None:
+        raise Unsupported("TAKE with row count computed at run time not supported yet")
+    if r == 0:
+        return Rel("(SELECT CAST(1 AS BIGINT) AS i, CAST(1 AS BIGINT) AS j, 'e' AS kind, "
+                   "CAST(NULL AS DOUBLE) AS num, CAST(NULL AS VARCHAR) AS txt, '#CALC!' AS err)", 1, 1)
+
+    c_idx = None
+    if len(args) == 3 and args[2] is not None:
+        c_idx = int_literal(args[2])
+        if c_idx is None:
+            raise Unsupported("TAKE with column count computed at run time not supported yet")
+        if c_idx == 0:
+            return Rel("(SELECT CAST(1 AS BIGINT) AS i, CAST(1 AS BIGINT) AS j, 'e' AS kind, "
+                       "CAST(NULL AS DOUBLE) AS num, CAST(NULL AS VARCHAR) AS txt, '#CALC!' AS err)", 1, 1)
+
+    if r is None and c_idx is None:
+        raise Unsupported("TAKE needs at least one of rows or columns")
+
+    conds = []
+    i_sel = "a.i"
+    j_sel = "a.j"
+    out_rows = a.rows
+    out_cols = a.cols
+
+    if r is not None:
+        if r > 0:
+            conds.append(f"a.i <= {r}")
+            out_rows = min(a.rows, r) if a.rows is not None else r
+        else:
+            if a.rows is None:
+                raise Unsupported("TAKE with negative row count on dynamically-sized array not supported yet")
+            n = min(a.rows, abs(r))
+            start_i = a.rows - n
+            conds.append(f"a.i > {start_i}")
+            i_sel = f"CAST(a.i - {start_i} AS BIGINT) AS i"
+            out_rows = n
+
+    if c_idx is not None:
+        if c_idx > 0:
+            conds.append(f"a.j <= {c_idx}")
+            out_cols = min(a.cols, c_idx) if a.cols is not None else c_idx
+        else:
+            if a.cols is None:
+                raise Unsupported("TAKE with negative column count on dynamically-sized array not supported yet")
+            m = min(a.cols, abs(c_idx))
+            start_j = a.cols - m
+            conds.append(f"a.j > {start_j}")
+            j_sel = f"CAST(a.j - {start_j} AS BIGINT) AS j"
+            out_cols = m
+
+    sql = f"(SELECT {i_sel}, {j_sel}, a.kind, a.num, a.txt, a.err FROM {a.sql} a WHERE {' AND '.join(conds)})"
+    return Rel(sql, out_rows, out_cols)
+
+
+def drop_(c, args, sheet: str) -> Rel:
+    """DROP(array, [rows], [cols]): drop the first rows rows (and cols cols when given)."""
+    if not 2 <= len(args) <= 3:
+        raise Unsupported("DROP needs two or three arguments")
+    a = relation(c, args[0], sheet)
+    r = int_literal(args[1]) if args[1] is not None else None
+    if args[1] is not None and r is None:
+        raise Unsupported("DROP with row count computed at run time not supported yet")
+    if r == 0:
+        return Rel("(SELECT CAST(1 AS BIGINT) AS i, CAST(1 AS BIGINT) AS j, 'e' AS kind, "
+                   "CAST(NULL AS DOUBLE) AS num, CAST(NULL AS VARCHAR) AS txt, '#CALC!' AS err)", 1, 1)
+
+    c_idx = None
+    if len(args) == 3 and args[2] is not None:
+        c_idx = int_literal(args[2])
+        if c_idx is None:
+            raise Unsupported("DROP with column count computed at run time not supported yet")
+        if c_idx == 0:
+            return Rel("(SELECT CAST(1 AS BIGINT) AS i, CAST(1 AS BIGINT) AS j, 'e' AS kind, "
+                       "CAST(NULL AS DOUBLE) AS num, CAST(NULL AS VARCHAR) AS txt, '#CALC!' AS err)", 1, 1)
+
+    if r is None and c_idx is None:
+        raise Unsupported("DROP needs at least one of rows or columns")
+
+    conds = []
+    i_sel = "a.i"
+    j_sel = "a.j"
+    out_rows = a.rows
+    out_cols = a.cols
+
+    if r is not None:
+        if r > 0:
+            if a.rows is not None and r >= a.rows:
+                raise Unsupported("DROP dropping all rows (#CALC!) not supported yet")
+            conds.append(f"a.i > {r}")
+            i_sel = f"CAST(a.i - {r} AS BIGINT) AS i"
+            out_rows = (a.rows - r) if a.rows is not None else None
+        else:
+            n = abs(r)
+            if a.rows is None:
+                raise Unsupported("DROP with negative row count on dynamically-sized array not supported yet")
+            if n >= a.rows:
+                raise Unsupported("DROP dropping all rows (#CALC!) not supported yet")
+            keep_rows = a.rows - n
+            conds.append(f"a.i <= {keep_rows}")
+            out_rows = keep_rows
+
+    if c_idx is not None:
+        if c_idx > 0:
+            if a.cols is not None and c_idx >= a.cols:
+                raise Unsupported("DROP dropping all columns (#CALC!) not supported yet")
+            conds.append(f"a.j > {c_idx}")
+            j_sel = f"CAST(a.j - {c_idx} AS BIGINT) AS j"
+            out_cols = (a.cols - c_idx) if a.cols is not None else None
+        else:
+            m = abs(c_idx)
+            if a.cols is None:
+                raise Unsupported("DROP with negative column count on dynamically-sized array not supported yet")
+            if m >= a.cols:
+                raise Unsupported("DROP dropping all columns (#CALC!) not supported yet")
+            keep_cols = a.cols - m
+            conds.append(f"a.j <= {keep_cols}")
+            out_cols = keep_cols
+
+    sql = f"(SELECT {i_sel}, {j_sel}, a.kind, a.num, a.txt, a.err FROM {a.sql} a WHERE {' AND '.join(conds)})"
+    return Rel(sql, out_rows, out_cols)
+
+
+def chooserows_(c, args, sheet: str) -> Rel:
+    """CHOOSEROWS(array, row_num1, [row_num2], ...): rows picked in the given order."""
+    if len(args) < 2:
+        raise Unsupported("CHOOSEROWS needs at least two arguments")
+    a = relation(c, args[0], sheet)
+    row_nums = [int_literal(arg) for arg in args[1:]]
+    if any(r is None for r in row_nums):
+        raise Unsupported("CHOOSEROWS with non-integer row indices not supported yet")
+
+    norm_rows = []
+    for r in row_nums:
+        if r == 0:
+            return Rel("(SELECT CAST(1 AS BIGINT) AS i, CAST(1 AS BIGINT) AS j, 'e' AS kind, "
+                       "CAST(NULL AS DOUBLE) AS num, CAST(NULL AS VARCHAR) AS txt, '#VALUE!' AS err)", 1, 1)
+        if r < 0:
+            if a.rows is None:
+                raise Unsupported("CHOOSEROWS with negative index on dynamically-sized array not supported yet")
+            nr = a.rows + r + 1
+        else:
+            nr = r
+        if nr <= 0 or (a.rows is not None and nr > a.rows):
+            return Rel("(SELECT CAST(1 AS BIGINT) AS i, CAST(1 AS BIGINT) AS j, 'e' AS kind, "
+                       "CAST(NULL AS DOUBLE) AS num, CAST(NULL AS VARCHAR) AS txt, '#VALUE!' AS err)", 1, 1)
+        norm_rows.append(nr)
+
+    vals = ", ".join(f"({new_i}, {old_i})" for new_i, old_i in enumerate(norm_rows, 1))
+    sql = (f"(SELECT CAST(r.ni AS BIGINT) AS i, a.j, a.kind, a.num, a.txt, a.err "
+           f"FROM {a.sql} a JOIN (VALUES {vals}) r(ni, oi) ON a.i = r.oi)")
+    return Rel(sql, len(norm_rows), a.cols)
+
+
+def choosecols_(c, args, sheet: str) -> Rel:
+    """CHOOSECOLS(array, col_num1, [col_num2], ...): columns picked in the given order."""
+    if len(args) < 2:
+        raise Unsupported("CHOOSECOLS needs at least two arguments")
+    a = relation(c, args[0], sheet)
+    col_nums = [int_literal(arg) for arg in args[1:]]
+    if any(cl is None for cl in col_nums):
+        raise Unsupported("CHOOSECOLS with non-integer column indices not supported yet")
+
+    norm_cols = []
+    for cl in col_nums:
+        if cl == 0:
+            return Rel("(SELECT CAST(1 AS BIGINT) AS i, CAST(1 AS BIGINT) AS j, 'e' AS kind, "
+                       "CAST(NULL AS DOUBLE) AS num, CAST(NULL AS VARCHAR) AS txt, '#VALUE!' AS err)", 1, 1)
+        if cl < 0:
+            if a.cols is None:
+                raise Unsupported("CHOOSECOLS with negative index on dynamically-sized array not supported yet")
+            nc = a.cols + cl + 1
+        else:
+            nc = cl
+        if nc <= 0 or (a.cols is not None and nc > a.cols):
+            return Rel("(SELECT CAST(1 AS BIGINT) AS i, CAST(1 AS BIGINT) AS j, 'e' AS kind, "
+                       "CAST(NULL AS DOUBLE) AS num, CAST(NULL AS VARCHAR) AS txt, '#VALUE!' AS err)", 1, 1)
+        norm_cols.append(nc)
+
+    vals = ", ".join(f"({new_j}, {old_j})" for new_j, old_j in enumerate(norm_cols, 1))
+    sql = (f"(SELECT a.i, CAST(cl.nj AS BIGINT) AS j, a.kind, a.num, a.txt, a.err "
+           f"FROM {a.sql} a JOIN (VALUES {vals}) cl(nj, oj) ON a.j = cl.oj)")
+    return Rel(sql, a.rows, len(norm_cols))
+
+
+def tocol_(c, args, sheet: str) -> Rel:
+    """TOCOL(array, [ignore], [scan_by_column]): flatten a 2-D array to one column."""
+    if not 1 <= len(args) <= 3:
+        raise Unsupported("TOCOL needs one to three arguments")
+    a = relation(c, args[0], sheet)
+    ignore = 0 if len(args) < 2 or args[1] is None else int_literal(args[1])
+    if ignore is None or ignore not in (0, 1, 2, 3):
+        raise Unsupported("TOCOL with unsupported ignore mode not supported yet")
+    scan_col = _flag(args[2] if len(args) == 3 else None, "TOCOL", False)
+
+    order = "a.j, a.i" if scan_col else "a.i, a.j"
+    if ignore == 1:
+        where = "WHERE a.kind IS NOT NULL"
+    elif ignore == 2:
+        where = "WHERE (a.kind IS NULL OR a.kind <> 'e')"
+    elif ignore == 3:
+        where = "WHERE (a.kind IS NOT NULL AND a.kind <> 'e')"
+    else:
+        where = ""
+
+    sql = (f"(SELECT row_number() OVER (ORDER BY {order}) AS i, CAST(1 AS BIGINT) AS j, "
+           f"a.kind, a.num, a.txt, a.err FROM {a.sql} a {where})")
+    out_rows = (a.rows * a.cols) if (a.rows is not None and a.cols is not None and ignore == 0) else None
+    return Rel(sql, out_rows, 1)
+
+
+def torow_(c, args, sheet: str) -> Rel:
+    """TOROW(array, [ignore], [scan_by_column]): flatten a 2-D array to one row."""
+    if not 1 <= len(args) <= 3:
+        raise Unsupported("TOROW needs one to three arguments")
+    a = relation(c, args[0], sheet)
+    ignore = 0 if len(args) < 2 or args[1] is None else int_literal(args[1])
+    if ignore is None or ignore not in (0, 1, 2, 3):
+        raise Unsupported("TOROW with unsupported ignore mode not supported yet")
+    scan_col = _flag(args[2] if len(args) == 3 else None, "TOROW", False)
+
+    order = "a.j, a.i" if scan_col else "a.i, a.j"
+    if ignore == 1:
+        where = "WHERE a.kind IS NOT NULL"
+    elif ignore == 2:
+        where = "WHERE (a.kind IS NULL OR a.kind <> 'e')"
+    elif ignore == 3:
+        where = "WHERE (a.kind IS NOT NULL AND a.kind <> 'e')"
+    else:
+        where = ""
+
+    sql = (f"(SELECT CAST(1 AS BIGINT) AS i, row_number() OVER (ORDER BY {order}) AS j, "
+           f"a.kind, a.num, a.txt, a.err FROM {a.sql} a {where})")
+    out_cols = (a.rows * a.cols) if (a.rows is not None and a.cols is not None and ignore == 0) else None
+    return Rel(sql, 1, out_cols)
+
+
+BUILDERS = {
+    "FILTER": filter_, "SORT": sort_, "SORTBY": sortby, "UNIQUE": unique_, "SEQUENCE": sequence,
+    "TAKE": take_, "DROP": drop_, "CHOOSECOLS": choosecols_, "CHOOSEROWS": chooserows_,
+    "TOCOL": tocol_, "TOROW": torow_,
+}
 
 
 class SpillBatch(list):
