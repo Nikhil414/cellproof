@@ -8,7 +8,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from cellproof import fastread, reader
+from cellproof import fastread, proof, reader
 from cellproof.compiler import NO_VALUE, compile_book
 from cellproof.compute import fill_missing
 from cellproof.emitter import run_dbt, write_project
@@ -129,6 +129,43 @@ def _watch(args) -> int:
     return run_watch(path, args.interval, args.runs, rerun, err=lambda line: print(line, file=sys.stderr))
 
 
+def _prove(args) -> int:
+    """`cellproof prove`: verify the workbook as `convert` does, then write a bundle someone else can check."""
+    if args.check is not None:
+        workbook = args.check_workbook
+        return proof.check(Path(args.check), workbook)
+    if args.workbook is None:
+        print("error: prove needs a workbook (or --check DIR to re-check a bundle)", file=sys.stderr)
+        return 2
+    try:
+        book = _load(args)
+    except UnreadableWorkbook as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
+    book, computed, why = fill_missing(book, args.workbook)
+    def compile_fn(b):
+        compiled = compile_book(b)
+        if why:
+            compiled.unresolved.update({k: f"{r} ({why})" for k, r in compiled.unresolved.items() if r == NO_VALUE})
+        return compiled
+    try:
+        compiled, verdicts, failures = verify_book(book, compile_fn)
+    except SqlFailed as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 3
+    for failure in failures:  # those cells are UNRESOLVED in the report; the bundle is still worth writing
+        print(f"error: {failure}", file=sys.stderr)
+    out = args.out or args.workbook.with_name(args.workbook.stem + "_proof")
+    counts = Counter({"PASS": 0, "FAIL": 0, "UNRESOLVED": 0})
+    counts.update(v.status for v in verdicts)
+    proof.bundle(out, args.workbook, book, compiled, verdicts, counts, computed)
+    if computed:
+        print(f"{len(computed)} expected values computed by the formulas library (the file had none saved)")
+    print(f"{counts['PASS']} pass, {counts['FAIL']} fail, {counts['UNRESOLVED']} unresolved -> {out / 'REPORT.md'}")
+    print(f"the bundle is in {out} (check it with: cellproof prove --check {out})")
+    return 3 if failures else 1 if counts["FAIL"] else 0
+
+
 def _write_sql(text: str) -> None:
     """The SQL as UTF-8 bytes: sheet names and text values can hold any character, and a console encoding that
     cannot print them (Windows' cp1252, or an ASCII redirect) must replace them - a replaced sheet name would make
@@ -180,9 +217,25 @@ def main(argv: list[str] | None = None) -> int:
                        help="read with the single-pass loader (falls back to openpyxl if it cannot)")
     watch.add_argument("--interval", type=float, default=1.0, help="seconds between checks (default: 1.0)")
     watch.add_argument("--runs", type=int, help="stop after this many re-runs (default: until Ctrl+C)")
+    prove = sub.add_parser("prove", help="write a bundle someone else can check, or re-check one",
+                           description="Verify the workbook as `convert` does, then write a folder holding cells.sql "
+                                       "(one runnable DuckDB script answering every cell), report.json, REPORT.md, "
+                                       "and proof.json (the workbook's hash, the tool versions and a seal). "
+                                       "`prove --check DIR` re-checks a bundle without trusting the machine that "
+                                       "made it. The SQL is about 10 MB for 200k formula cells; no compression, "
+                                       "because a proof should be readable.")
+    prove.add_argument("workbook", type=Path, nargs="?")
+    prove.add_argument("--out", type=Path, help="the bundle folder (default: <workbook>_proof next to the file)")
+    prove.add_argument("--fast", action="store_true",
+                       help="read with the single-pass loader (falls back to openpyxl if it cannot)")
+    prove.add_argument("--check", metavar="DIR", help="re-check the bundle in DIR instead of writing one")
+    prove.add_argument("--workbook", dest="check_workbook", type=Path,
+                       help="with --check: also re-read the workbook this bundle names")
     args = parser.parse_args(argv)
     if args.command == "sql":
         return _sql(args)
+    if args.command == "prove":
+        return _prove(args)
     if args.command == "watch":
         try:
             return _watch(args)

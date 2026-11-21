@@ -60,16 +60,24 @@ def execute(book: Book, compiled: Compiled) -> dict[Key, tuple]:
 
 def matches(cell: Cell, kind: str, num, txt) -> bool:
     """Excel's saved value vs the SQL result. An Excel error matches only the same error code."""
-    if cell.kind == "e":
-        return kind == "e" and txt == cell.value
-    if kind == "e" or (num is None and txt is None):
+    return same(kind, num, txt, cell.kind, cell.value)
+
+
+def same(kind: str, num, txt, other_kind: str, other) -> bool:
+    """Is an answer (`kind`/`num`/`txt`, the way a query row holds it) the same as another answer (`other_kind` and
+    its plain value `other`)? One answer holds a number in `num`, a boolean as 1.0/0.0 in `num`, and text or an error
+    code in `txt`. `matches` wraps this for a cell and `prove --check` calls it on two recorded answers, so a bundle
+    cannot pass a check that the verify run would fail - there is one notion of "equal" in cellproof."""
+    if kind == "e":
+        return other_kind == "e" and other == txt
+    if other_kind == "e" or (num is None and txt is None):
         return False
-    if cell.kind == "n":
-        return kind == "n" and math.isclose(cell.value, num, rel_tol=1e-9, abs_tol=1e-12)
-    if cell.kind == "b":
-        return kind == "b" and num == (1.0 if cell.value else 0.0)
-    if cell.kind == "s":
-        return kind == "s" and txt == cell.value
+    if kind == "n":
+        return other_kind == "n" and math.isclose(other, num, rel_tol=1e-9, abs_tol=1e-12)
+    if kind == "b":
+        return other_kind == "b" and num == (1.0 if other else 0.0)
+    if kind == "s":
+        return other_kind == "s" and other == txt
     return False
 
 

@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.2.0 (unreleased)
+
+- **`cellproof prove`: a result you can hand to someone.** It verifies the workbook as `convert` does, then writes a
+  folder holding `cells.sql` (one runnable DuckDB script: the input cells, every formula batch in dependency order, a
+  final `SELECT` for every cell), `report.json` and `REPORT.md` (what `convert` would have written), and `proof.json`
+  (the workbook's size and hash, the cellproof/DuckDB/Python versions and the platform, the workbook's own `<calcPr>`
+  attributes and last-saving program, the counts, a hash per file and one over the set).
+- **`cellproof prove --check DIR [--workbook book.xlsx]`** re-checks a bundle without trusting the machine that made
+  it: it re-hashes the files, optionally re-reads the workbook and compares the values it holds with the ones the
+  report records as Excel's, and runs `cells.sql` on a fresh DuckDB to see whether it still answers what `report.json`
+  says. Exit code 0 (all held), 1 (an answer moved), 2 (a file, a hash or the format is wrong), 3 (cellproof generated
+  SQL DuckDB rejected). Console output is unchanged for every other command.
+- **The seal is not a signature, and the report says so.** The hashes catch an accident or a casual edit; they cannot
+  stop someone with write access to the folder, who can reseal. What that person cannot fake is `cells.sql`
+  disagreeing with `report.json`, which is why `--check` runs the script rather than stopping at the hashes. One line
+  under `REPORT.md`'s title states it.
+- **One notion of "equal".** `verifier.matches` is now a thin wrapper over a new plain `verifier.same(kind, num, txt,
+  other_kind, other)`; `prove --check` compares answers with it, so a bundle can never pass `--check` on a value the
+  verifier would call a FAIL.
+- **`Book.calc`** records the workbook's `<calcPr>` (`calcMode`, `fullCalcOnLoad`, `calcId`, all `None` when the file
+  is silent) next to `Book.app`, through both loaders. It is only read, never acted on: 1.2 does not decide whether a
+  saved value is stale.
+- Runtime dependencies are still only `openpyxl` and `duckdb`; the bundle is DuckDB-only, and `proof.json` records
+  which engine produced the verdicts so a Postgres proof can come later without changing the format.
+
 ## 1.1.1 (2026-11-18)
 
 - **`--fast`: read the workbook in one pass.** `cellproof convert`, `cellproof sql` and `cellproof watch` accept

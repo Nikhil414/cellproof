@@ -85,6 +85,7 @@ cellproof convert book.xlsx --dbt           # also run `dbt build` on the genera
 cellproof convert book.xlsx --stats         # print the unresolved cells' reasons, most common first
 cellproof sql book.xlsx --sheet Sales --range D2:D1000   # the SQL for those cells only
 cellproof watch book.xlsx                  # verify again on every save; print only what changed
+cellproof prove book.xlsx                  # verify, then write a bundle someone else can check
 cellproof convert book.xlsx --target postgres            # verify on Postgres too (see below)
 cellproof convert book.xlsx --fast         # read the workbook in one pass (same verdicts, less time)
 ```
@@ -122,6 +123,45 @@ It answers exactly what `cellproof convert` would compute for those cells. A cel
 in the script (nothing could read it anyway); the reason is printed to stderr, ranked, and the command exits 1, so a
 piped script never quietly loses a cell. Without `--sheet` the whole workbook is the selection (hidden array-constant
 sheets are left out).
+
+### A result you can hand over
+
+`cellproof prove book.xlsx` verifies the workbook exactly as `convert` does, then writes the result as a folder
+someone else can check without trusting you or cellproof:
+
+```bash
+cellproof prove book.xlsx                                # writes book_proof/ next to the file
+cellproof prove book.xlsx --out bundle                   # choose the folder
+cellproof prove --check bundle                           # re-check a bundle: hashes, then the SQL itself
+cellproof prove --check bundle --workbook book.xlsx      # ... and re-read the workbook it names
+```
+
+The folder holds `cells.sql` (one runnable DuckDB script: the input cells, every formula batch in dependency order,
+and a final `SELECT` for every cell), `report.json` and `REPORT.md` (what `convert` would have written), and
+`proof.json` (the workbook's size and hash, the cellproof/DuckDB/Python versions and the platform, the workbook's own
+`<calcPr>` and last-saving program, the counts, and a hash of each file plus one over the set).
+
+Anyone with DuckDB can check the claim by hand: run `cells.sql`, compare each row with `report.json`, hash the
+workbook. `--check` does the same thing and says how it went:
+
+```
+3 files intact
+workbook hash matches
+4 saved values match the report
+cells.sql reproduces 4 of 4 answers
+the bundle checks out
+```
+
+Exit code: `0` every check held, `1` an answer moved (the SQL disagrees with the report, or the workbook no longer
+holds the values the report records), `2` a file, a hash or the format is wrong, `3` DuckDB rejected SQL cellproof
+generated.
+
+The seal is **not a signature**. The hashes catch a file changed by accident or by a casual edit; they cannot stop
+someone with write access to the folder, who can reseal it. What that person still cannot fake is `cells.sql`
+disagreeing with `report.json`, which is why `--check` runs the script instead of stopping at the hashes. `REPORT.md`
+says this in one line under its title. A cell that could not be translated is a hole in `cells.sql`, not a wrong
+answer: `report.json` says why. `cells.sql` is about 10 MB for 200,000 formula cells - no compression, because a proof
+should be readable.
 
 ### Editing while watching
 

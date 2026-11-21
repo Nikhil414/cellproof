@@ -1,6 +1,6 @@
 # cellproof: progress
 
-Last updated: 2026-11-20. This file is the single place that says where the project stands. Read it cold: a person
+Last updated: 2026-11-21. This file is the single place that says where the project stands. Read it cold: a person
 or a coding agent should be able to pick up the work from here. For the rules of the code read `AGENTS.md`; for what
 the tool does and its limits, `README.md`.
 
@@ -17,7 +17,7 @@ bug. Output: `REPORT.md` / `report.json` and a dbt project that runs exactly the
 | What | State |
 |---|---|
 | PyPI | **1.1.1** is the latest release (`pip install cellproof`), published 2026-11-20 from tag `v1.1.1` (trusted publishing) |
-| `main` | **1.1.1**: `--fast` (read each worksheet once, identical `Book`), on top of 1.1.0's `cellproof sql` (PR #19) and `cellproof watch` (PR #20); PR #22 also fixes TEXT's number formats on the Postgres target (sqlglot 30.33 turned `printf`/`format` into an expression the rewrite missed). Tag `v1.1.1` = the 1.1.1 release commit, `43844f7` |
+| `main` | **1.1.1**: `--fast` (read each worksheet once, identical `Book`), on top of 1.1.0's `cellproof sql` (PR #19) and `cellproof watch` (PR #20); PR #22 also fixes TEXT's number formats on the Postgres target (sqlglot 30.33 turned `printf`/`format` into an expression the rewrite missed). Tag `v1.1.1` = the 1.1.1 release commit, `43844f7`. Plus the two DuckDB 2.0.1 fixes: PR #26 (`TEXT` agrees with `ROUND`, Postgres overflow guarded before scaling) and PR #28 (`ROUND`/`ROUNDUP`/`ROUNDDOWN`/`TRUNC` decide their boundary before scaling) |
 | Release | [v1.1.1](https://github.com/Nikhil414/cellproof/releases/tag/v1.1.1), 2026-11-20: 13/13 CI checks green, `publish.yml` published to PyPI. [v1.1.0](https://github.com/Nikhil414/cellproof/releases/tag/v1.1.0), 2026-11-17: `cellproof sql` and `cellproof watch`. 1.0.0 ([v1.0.0](https://github.com/Nikhil414/cellproof/releases/tag/v1.0.0), 2026-11-17) added the Postgres target, dbt-postgres, the playground and the console triage |
 | Playground | Live at https://nikhil414.github.io/cellproof/ (GitHub Pages, deployed by `.github/workflows/pages.yml` on every push to `main` that touches `src/`, `playground/` or the example) |
 | Tests | `main` (1.1.1: `--fast`): **746 pass, 3 skip** (749 collected) with dbt-postgres installed and the 85-workbook corpus present (2026-11-20; the 3 skips are the optional `compute` extra and the opt-in 200k benchmark), including 85 parametrized differential tests that read every public workbook with both loaders and require the same `Book`, and the Postgres format tests. The same suite is green on **DuckDB 2.0.0 and 2.0.1** (736 pass / 13 skip in the lean CI-shaped venv: sqlglot, jinja2, dbt and the corpus are absent there). 1.1.0: 622 pass, 3 skip |
@@ -37,6 +37,7 @@ bug. Output: `REPORT.md` / `report.json` and a dbt project that runs exactly the
 | `tests/` | pytest suite; `tests/corpus.py DIR [convert options]` runs the 85 public workbooks; `tests/xlsxkit.py` builds test workbooks |
 | `src/cellproof/watch.py` | `cellproof watch` (1.1): `Run` (one verification's counts, verdict snapshot, seconds, "where to start"), `changes()` (what changed between two runs, worst first), `run_watch()` (the poll loop; fully injectable `out`/`sleep`/`stat` so tests are deterministic) |
 | `src/cellproof/query.py` | `cellproof sql` (1.1): a runnable DuckDB script for a selection instead of a whole project |
+| `src/cellproof/proof.py` | `cellproof prove` (1.2): `cells_sql` (the whole chain as one script), `manifest`/`seal` (the hashes), `bundle` (write the four files), `check` (`--check`: hashes, the workbook's saved values, then `cells.sql` on a fresh DuckDB) |
 | `examples/` | Excel-saved workbooks (`functions.xlsx` is the playground's example) and the scripts that made them |
 | `docs/superpowers/specs/`, `docs/superpowers/plans/` | design and plan of each piece; `PLAN*.md` at the root are the early plans, kept for history |
 | `docs/demo.gif` | README demo, cut from the promo video |
@@ -96,6 +97,7 @@ Everything was built test-first; each piece was reviewed by a fresh reviewer.
 | Console triage (`main`) | every conversion prints the top five unresolved reasons (ranked by cells blocked) and the wrong answers other formulas read (direct readers only, "read by" never "blocks"), so the counts alone no longer need the report; the reverse pass reuses the compile's tokens and bisects per column, so whole-column references are O(log n); `postgres._readers` now delegates to it |
 | 1.0 (released 2026-11-17) | `postgres.verify_book` recompiles without what Postgres cannot run, so the dbt-postgres project only holds SQL that ran; helpers created in the target schema by an `on-run-start` macro; `profiles.yml` reads `CELLPROOF_PG_*`; `--dbt` builds on the Postgres that verified; CI Postgres 16 job |
 | `cellproof sql` (1.1) | a runnable DuckDB script for a selection instead of a dbt project: the input cells the formulas read, the batches they depend on in dependency order (kept or dropped whole - one batch is one statement - and closed under "reads"), then a `SELECT` for the asked-for cells. SQL to stdout, ranked reasons to stderr, exit 1 when a cell was left out. Bypasses the verifier, so it costs one compile and no DuckDB run: 0.7 s for a 20k-cell workbook, 0.4 s to run the printed script |
+| `cellproof prove` (1.2, piece 1) | verify as `convert` does, then write a bundle a stranger can check: `cells.sql` (the whole chain, one runnable DuckDB script), `report.json`, `REPORT.md`, and `proof.json` (workbook hash and size, tool versions, the workbook's own `<calcPr>` and last-saving program, counts, a hash per file and one over the set). `prove --check DIR [--workbook f]` re-hashes, optionally re-reads the workbook and compares its saved values with the report, then runs `cells.sql` on a fresh DuckDB and compares every row - exit 0/1/2/3. The seal is not a signature and `REPORT.md` says so in one line; `verifier.matches` became a wrapper over `verifier.same` so `--check` and `convert` cannot disagree about "equal" |
 | PR #7 (merged 2026-11-13) | DEC2BIN, DEC2HEX, DEC2OCT and BIN2DEC, HEX2DEC, OCT2DEC (issue #2); hex text cast to BIGINT so DuckDB 1.2 works; cases not checked in real Excel (`HEX2DEC("")`, a negative invalid `places`) stay UNRESOLVED, never guessed |
 
 ## The public test workbooks
@@ -259,17 +261,23 @@ From Excel-saved files (`tests/test_excel_findings.py`, `tests/test_corpus_findi
 
 ## Next
 
-`main` is 1.1.1 and about to be released: 1.1.0 (`cellproof sql` in PR #19, `cellproof watch` in PR #20, merged
-2026-11-17) plus `--fast`, the one-pass read path, which closes the last item of "Rest of 1.1". The order below is
-what makes it a tool people reach for daily (remaining 1.2) before the function-coverage work (2.0, issue #14).
+`main` is 1.1.1: 1.1.0 (`cellproof sql` in PR #19, `cellproof watch` in PR #20, merged 2026-11-17) plus `--fast`, the
+one-pass read path. The order below is what makes it a tool people reach for daily (1.2) before the function-coverage
+work (2.0, issue #14).
 
-1. **1.2 - trust.**
-   - `cellproof prove book.xlsx`: a self-contained proof bundle (the workbook's hash, cellproof's version, the SQL
-     for every cell, Excel's saved value, the result, and the report), so a converted model can be audited later
-     without trusting the machine that ran it.
-   - Stale-cached-value detection: a formula cell whose saved value does not match its formula (Excel never
-     recalculated after an edit) - today those read as FAILs, which teaches people to ignore FAILs.
-   - `cellproof diff old.xlsx new.xlsx`: what changed between two versions of a workbook, and which SQL cells moved.
+1. **1.2 - trust.** Spec: `docs/superpowers/specs/2026-11-21-trust-design.md`. Three pieces, each its own PR, in order;
+   1.2.0 is tagged after the third.
+   - **Piece 1 (done, in review): `cellproof prove book.xlsx`** - a bundle (`cells.sql`, `report.json`, `REPORT.md`,
+     `proof.json`) a stranger checks with DuckDB alone, plus `prove --check DIR [--workbook f]`, which re-hashes the
+     files, re-reads the workbook's saved values, and runs `cells.sql` against `report.json`. Exit 0/1/2/3. The seal
+     detects accidents, not forgery, and `REPORT.md` says so. `Book.calc` now carries the workbook's `<calcPr>`.
+   - **Piece 2 (next): the FAIL split.** A FAIL whose inputs were all right is a **primary** FAIL; one that reads a
+     FAIL (directly or through other formulas) is **inherited**. Today both read the same, which teaches people to
+     ignore FAILs. Plus the saved-value diagnosis: quote the file's own `<calcPr>`/`last_saved_by` evidence instead of
+     calling a cell "stale", which cannot be proven. `report.json` gains a `failures` key; no status is added.
+   - **Piece 3: `cellproof diff old.xlsx new.xlsx`** - what changed between two saves, and which SQL cells moved.
+     Verdicts come from the normal region-mode run; the SQL compared comes from a second cell-mode compile, because
+     regions may merge or split differently between the two files.
 2. **Merge PR #5** (overflow as `#NUM!`) once the region path uses the same `BIND_SQL` binder as cell mode (cell
    mode is already bounded, e.g. 781,211 -> 164,411 chars at 200 terms) - the last known-wrong-answer gap.
 3. **2.0 roadmap (issue #14), in order** (the cross-pairs landed first, PR #15):

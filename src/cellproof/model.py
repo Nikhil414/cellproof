@@ -46,6 +46,17 @@ class Cell:
         return (self.sheet, self.row, self.col)
 
 
+@dataclass(frozen=True)
+class Calc:
+    """What the file says about the values it saved: xl/workbook.xml's `<calcPr>`. None where the file is silent -
+    the attributes are recorded, never guessed, because a manual-calculation file holds whatever the last full
+    calculation left."""
+
+    mode: str | None = None  # "auto", "manual", "autoNoTable"
+    full_on_load: bool | None = None  # Excel will recalculate everything when the file is next opened
+    calc_id: int | None = None  # the calculation engine's stamp; absent or 0 means Excel probably did not write this
+
+
 @dataclass
 class Book:
     cells: dict[Key, Cell]
@@ -57,6 +68,7 @@ class Book:
     arrays: set[str] = field(default_factory=set)  # hidden sheets of array constants (cellproof.parser.ARRAY_SHEET)
     tables: dict = field(default_factory=dict)  # TABLE NAME (upper) -> cellproof.tables.Table
     unread: dict = field(default_factory=dict)  # formula cell -> why its structured references were not rewritten
+    calc: Calc = field(default_factory=Calc)  # what the file says about its own saved values
 
     @cached_property
     def _rows_by_col(self) -> dict[tuple[str, int], list[int]]:
