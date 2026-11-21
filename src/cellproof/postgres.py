@@ -161,6 +161,8 @@ LANGUAGE sql IMMUTABLE AS $$
               WHEN a < 0 THEN '-Infinity'::float8 ELSE 'NaN'::float8 END $$;
 
 -- DuckDB's string_split: '' splits into characters, and '' itself is [''] (string_to_array gives the whole text, {})
+-- DuckDB 2.0.1 changed split('', '') to []; the functions here guard the empty text themselves, so this keeps the
+-- answer every DuckDB up to 2.0.0 gave (PROPER("") is '', not NULL).
 CREATE OR REPLACE FUNCTION pg_temp.cellproof_split(t text, d text) RETURNS text[]
 LANGUAGE sql IMMUTABLE AS $$
   SELECT CASE WHEN t = '' THEN ARRAY['']::text[] WHEN d = '' THEN regexp_split_to_array(t, '')

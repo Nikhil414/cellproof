@@ -11,6 +11,7 @@ from __future__ import annotations
 import functools
 
 from cellproof.expr import BLANK, CELLS, NO_ERR, PLATFORM, UNCHECKED, Expr, errs, num, num_strict, num_text, txt, where_area
+from cellproof.fn.maths import xl15
 from cellproof.functions import arity, register
 from cellproof.model import Unsupported
 from cellproof.parser import Bool, RefNode, Str
@@ -148,10 +149,12 @@ _text1("TRIM", lambda t: f"regexp_replace(trim({t}, ' '), ' +', ' ', 'g')")  # E
 _text1("UPPER", lambda t: f"upper({t})")
 _text1("LOWER", lambda t: f"lower({t})")
 # each character paired with the one before it; t stays outside the lambda (it can be a subquery, which DuckDB does
-# not allow inside one). \p{L}: any letter, accented ones too (RE2's [[:alpha:]] is ASCII only)
-_text1("PROPER", lambda t: (f"array_to_string(list_transform(list_zip(string_split({t}, ''), "
-                            f"list_concat([' '], string_split({t}, ''))), lambda x: CASE WHEN "
-                            f"regexp_matches(x[2], '\\p{{L}}') THEN lower(x[1]) ELSE upper(x[1]) END), '')"))
+# not allow inside one). \p{L}: any letter, accented ones too (RE2's [[:alpha:]] is ASCII only). The '' guard is not
+# cosmetic: DuckDB 2.0.1 made string_split('', '') return [] instead of [''], which turned PROPER("") into NULL.
+_text1("PROPER", lambda t: (f"(CASE WHEN {t} = '' THEN '' ELSE array_to_string(list_transform("
+                            f"list_zip(string_split({t}, ''), list_concat([' '], string_split({t}, ''))), "
+                            f"lambda x: CASE WHEN regexp_matches(x[2], '\\p{{L}}') THEN lower(x[1]) "
+                            f"ELSE upper(x[1]) END), '') END)"))
 _text1("CLEAN", lambda t: f"regexp_replace({t}, '[\\x00-\\x1f]', '', 'g')")
 
 
@@ -252,8 +255,21 @@ def char(c, args, sheet):
 
 def _fixed(decimals: int, grouped: bool, percent: bool):
     def sql(x: str) -> str:
-        v = f"round({x} * 100, {decimals})" if percent else f"round({x}, {decimals})"
-        v = f"(CASE WHEN {v} = 0 THEN CAST(0 AS DOUBLE) ELSE {v} END)"  # real Excel: TEXT(-0.001,"0.00") is "0.00", not "-0.00"
+        # Excel rounds the value it shows: 15 significant digits, then half away from zero, so TEXT(1.005,"0.00") is
+        # "1.01" like ROUND(1.005,2). DuckDB's round(x::DOUBLE, n) skips the 15 digits (1.005 -> 1.00) and since 2.0.1
+        # rounds ties to even (2.675 -> 2.67), so the value is scaled, snapped with xl15 like ROUND does, and rounded
+        # whole. The value is bound once: repeating it per branch made the SQL 7x larger.
+        p = 10 ** decimals
+        shown = 100 if percent else 1  # Excel shows a percent as its hundredfold
+        # A value too large to scale keeps its digits: scaling it would overflow a double, and PostgreSQL raises there
+        # where DuckDB quietly returns inf, which lost the whole batch. A plain format shows such a value unchanged
+        # (as 1.1.1 did); a percent has no answer without scaling, so it stays NULL and the cell FAILs visibly.
+        bound = (f"FROM (SELECT sv, CASE WHEN abs(sv) < 1e300 THEN abs(sv) * {shown * p} END AS sc "
+                 f"FROM (SELECT {x} AS sv))")
+        raw = "NULL" if percent else "sv"
+        # + 0.0 turns a rounded-to-zero -0.0 into 0.0, so no "-0.00" (real Excel: TEXT(-0.001,"0.00") is "0.00")
+        v = (f"(SELECT CASE WHEN sc IS NULL THEN {raw} WHEN NOT isfinite(sc) THEN sv * {shown} "
+             f"ELSE sign(sv) * round({xl15('sc')}) / {p} END + CAST(0 AS DOUBLE) {bound})")
         body = f"format('{{:,.{decimals}f}}', {v})" if grouped else f"printf('%.{decimals}f', {v})"
         return f"({body} || '%')" if percent else body
     return sql

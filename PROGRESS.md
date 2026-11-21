@@ -20,7 +20,7 @@ bug. Output: `REPORT.md` / `report.json` and a dbt project that runs exactly the
 | `main` | **1.1.1**: `--fast` (read each worksheet once, identical `Book`), on top of 1.1.0's `cellproof sql` (PR #19) and `cellproof watch` (PR #20); PR #22 also fixes TEXT's number formats on the Postgres target (sqlglot 30.33 turned `printf`/`format` into an expression the rewrite missed). Tag `v1.1.1` = the 1.1.1 release commit, `43844f7` |
 | Release | [v1.1.1](https://github.com/Nikhil414/cellproof/releases/tag/v1.1.1), 2026-11-20: 13/13 CI checks green, `publish.yml` published to PyPI. [v1.1.0](https://github.com/Nikhil414/cellproof/releases/tag/v1.1.0), 2026-11-17: `cellproof sql` and `cellproof watch`. 1.0.0 ([v1.0.0](https://github.com/Nikhil414/cellproof/releases/tag/v1.0.0), 2026-11-17) added the Postgres target, dbt-postgres, the playground and the console triage |
 | Playground | Live at https://nikhil414.github.io/cellproof/ (GitHub Pages, deployed by `.github/workflows/pages.yml` on every push to `main` that touches `src/`, `playground/` or the example) |
-| Tests | `main` (1.1.1: `--fast`): **741 pass, 3 skip** (744 collected) with dbt-postgres installed and the 85-workbook corpus present (2026-11-20; the 3 skips are the optional `compute` extra and the opt-in 200k benchmark), including 85 parametrized differential tests that read every public workbook with both loaders and require the same `Book`, and the Postgres format tests. 1.1.0: 622 pass, 3 skip |
+| Tests | `main` (1.1.1: `--fast`): **746 pass, 3 skip** (749 collected) with dbt-postgres installed and the 85-workbook corpus present (2026-11-20; the 3 skips are the optional `compute` extra and the opt-in 200k benchmark), including 85 parametrized differential tests that read every public workbook with both loaders and require the same `Book`, and the Postgres format tests. The same suite is green on **DuckDB 2.0.0 and 2.0.1** (736 pass / 13 skip in the lean CI-shaped venv: sqlglot, jinja2, dbt and the corpus are absent there). 1.1.0: 622 pass, 3 skip |
 | CI | `tests` workflow: Windows/macOS/Linux x Python 3.10-3.13, plus the `postgres` job (Postgres 16 service, Postgres tests and `dbt build`): **13 checks** on every pull request. Green on the release commit |
 | Public test workbooks (85) | **11,080 PASS / 16 FAIL / 37,814 UNRESOLVED**, identical on DuckDB 2.0, on DuckDB 1.2 (the playground) and on Postgres (with `dbt build` passing for all 85). The 16 FAIL are explained below. A fresh re-download of the corpus on 2026-11-15 (the source repos changed; 66 files now) measured **13,043 PASS / 34 FAIL / 19,183 UNRESOLVED** — one workbook (formulas' `test.xlsx`, a function catalog) holds 17,454 of the UNRESOLVED, and `CONVERT` alone 3,593 (19%). Of the 34 FAIL, 19 were wrong error codes from PR #7's base conversions ([issue #10](https://github.com/Nikhil414/cellproof/issues/10)), 9 are the known LibreOffice drift in `INFORMATION.xlsx`/`SQRT.xlsx`; 6 are the known npv float cells; the 19 error codes were fixed the same day (PR #12), bringing the fresh-corpus count to **13,062 PASS / 15 FAIL**. 2026-11-15: the six base cross-pairs (HEX2BIN/HEX2OCT/BIN2HEX/BIN2OCT/OCT2HEX/OCT2BIN, semantics verified against Excel-saved values in `test.xlsx`) turned **669** more cells PASS: fresh corpus now **13,732 PASS / 15 FAIL / 18,513 UNRESOLVED**, 0 FAILs on `BASES.xlsx` and `test.xlsx` |
 | Contributors | Open: PR #5 (overflow as `#NUM!`; both 2026-11-07 requests are met - the criteria change is now *guarded* by `_criterion_error`, so a computed error criterion stays `#UNCHECKED`/UNRESOLVED instead of guessing Excel's answer, and `BIND_SQL` materializes oversized arithmetic - but changes requested 2026-11-20 because the binder covers cell mode only: the region path has no binder and grows quadratically, and `postgres` is red only from a stale base), PR #23 (TAKE/DROP/CHOOSE*/TOCOL/TOROW, reviewed 2026-11-20: negative indices return `#SPILL!` where Excel returns a value, `TAKE`/`DROP` refuse the 0/negative counts Excel defines, `TOCOL`/`TOROW` `ignore` 2/3 missing, the `postgres.py` hunk now conflicts with 1.1.1's `fmt_call`, needs a rebase; all proven against Excel-saved cells in `test_test_files_test.xlsx` sheet `LOOKUP`). Merged: PR #7 (DEC2BIN/HEX/OCT and back, MilindLate, 2026-11-13, closes #2; unverified cases guarded, never guessed), PR #9 (`--stats` flag: count-sorted tally of UNRESOLVED reasons on the console, 2026-11-15), PR #12 (base conversions: match real Excel's error codes, closes #10, 2026-11-15), PR #15 (the six base cross-pairs, 2026-11-16, issue #14's first roadmap item), PR #17 (console triage: ranked unresolved reasons and the wrong answers other cells read, 2026-11-16), PR #8 (1.0: the Postgres target and dbt-postgres project, 2026-11-17, released as v1.0.0). Closed: PR #6 (superseded by #5). Issues #1, #3, #4, #14 open, #4 pinned; #3 has a contributor spec comment (2026-11-15: TAKE, DROP, CHOOSECOLS, CHOOSEROWS, TOCOL, TOROW against the `fn/dynamic.py` relation model); #10 was fixed in PR #12 and closed 2026-11-15; #14 is the 2.0 roadmap (ranked UNRESOLVED table) |
@@ -169,6 +169,29 @@ From Excel-saved files (`tests/test_excel_findings.py`, `tests/test_corpus_findi
   bridge rewrites lambdas for DuckDB < 1.3. `list_concat` with more than two lists needs DuckDB 1.3 (cellproof nests
   pairs). Hex text cast to HUGEINT fails before DuckDB 2.0 (BIGINT works everywhere). Python 3.10 cannot install
   DuckDB 2.0, so CI's 3.10 jobs run DuckDB 1.5: a good early warning for version-specific SQL.
+- **DuckDB 2.0.1 changed two answers under cellproof** (uploaded 2026-11-20, after `main`'s last green CI at 11:42, so
+  it surfaced only on new pull requests): `string_split('', '')` went from `['']` (length 1) to `[]` (length 0), and
+  `round(x::DOUBLE, n)` went from ties-away-from-zero to ties-to-even, so `round(2.675::DOUBLE, 2)` is `2.67`, not
+  `2.68`. Both were real: `PROPER("")` returned NULL instead of `''` (poisoning every cell that read it) and
+  `TEXT(2.675,"0.00")` returned `"2.67"`. Fixed in code, not by pinning, because both corrections are correct on every
+  version: `PROPER` now returns `''` for empty text itself, and `_fixed` scales, snaps with `xl15` and rounds a whole
+  number, the way `ROUND` already did. Only the DOUBLE path drifted - `round(2.675::DECIMAL(18,3), 2)` is still `2.68`,
+  and `printf('%.2f', 2.675)` was `2.67` on every version, which is why `TEXT` never leaned on it.
+  Fixing this surfaced a **pre-existing** bug on all versions: `TEXT(1.005,"0.00")` said `"1.00"` while
+  `ROUND(1.005,2)` said `1.01`, the answer `maths.py` documents as real Excel's. `TEXT` now goes through the same
+  `xl15` snap, so the two agree by construction (a test compares them cell by cell). The value is bound once in a
+  derived table: repeating it per branch made the SQL 1991 chars per cell instead of 380 (441 with the overflow
+  guard below). Scaling caught a **Postgres-only** regression that the plan had not foreseen: Postgres *raises*
+  `value out of range: overflow` on float8 overflow where DuckDB returns `inf`, and one such cell makes
+  `postgres.execute` mark the **whole batch** UNRESOLVED (`ROUND(1e308,2)` already does this on `main` - a separate,
+  pre-existing bug, left for a follow-up). `_fixed` therefore tests the magnitude **before** scaling
+  (`CASE WHEN abs(sv) < 1e300 THEN abs(sv) * <shown*p> END`): a value too large to scale keeps the digits 1.1.1
+  showed it with (byte-identical to `main` for `1e300`/`1e307`/`1e308`/`-1e308`/`1e-320` over six formats), and a
+  percent of such a value has no answer without scaling, so it is NULL and the cell FAILs visibly instead of dying.
+- **`xl15` and constant folding:** `xl15(0)` raises `Conversion Error: ... value -inf can't be cast ... INT32` when the
+  argument is a bare literal, but not for a column or a `CAST(... AS DOUBLE)`. Neither `ROUND` nor `TEXT` can hit it:
+  the compiler emits literals as `CAST(0.0 AS DOUBLE)`, and `_fixed` hands `xl15` the column `sc` from a derived
+  table, so the argument is never a literal. `=TEXT(0,"0.00")` is a test, so that stays true.
 - **Pyodide:** the newest DuckDB built for it is 1.2 (Pyodide 0.27, Python 3.12); micropip-installing it crashed in
   Chromium ("null function" on the first `read_csv`), unpacking the wheel works.
 - **Postgres:** unnamed columns are all called `?column?`, so CREATE TABLE AS fails (the dbt models name them);
@@ -177,6 +200,16 @@ From Excel-saved files (`tests/test_excel_findings.py`, `tests/test_corpus_findi
 
 ## Open work
 
+- **DuckDB 2.0.1 drift (fixed, in review):** see "Engine differences" above. Five regression tests in `test_text.py`
+  (`=PROPER("")`, `=TEXT(0,"0.00")`, `=TEXT(1.005,"0.00")`, one requiring `TEXT` and `ROUND` to agree, one that a
+  value too large to scale keeps its digits without losing the batch), three on the Postgres target, and the
+  `postgres` rewrite test's `string_split('', '')` case replaced - that input's answer is now version-dependent, so
+  asserting the shim equals live DuckDB on it was a test that could only pass on one version. The shim keeps the
+  2.0.0 answer and is only ever reached with guarded (non-empty) text, which the new Postgres tests pin.
+- **Follow-up: `ROUND` shares the Postgres overflow trap.** `_digits`/`ROUND` scale with `abs(x) * power(10, d)` and
+  guard afterwards, and Postgres raises where DuckDB returns `inf`, so `ROUND(1e308, 2)` - also as a literal -
+  already turns every cell of its batch UNRESOLVED on `main`. Same fix as `TEXT`'s (test the magnitude before
+  scaling); left out of the drift PR to keep it a bug fix, not a behaviour change.
 - **PR #5 (overflow as #NUM!, imshah-id):** the right approach (checked per operation, so IFERROR sees it; regions,
   cells and arrays agree; results stay correct - every measured case is still PASS, so nothing here is a false PASS).
   The two 2026-11-07 requests are met: the COUNTIF/SUMIF error-criterion change is *guarded* (`_criterion_error` maps a

@@ -8,6 +8,7 @@ CASES = [  # formula, Excel's answer (Microsoft's function reference)
     ('=LEFT("Excel", 2)', "Ex"), ('=LEFT("Excel")', "E"), ('=RIGHT("Excel", 3)', "cel"), ('=MID("Excel", 2, 3)', "xce"),
     ('=MID("Excel", 0, 1)', "#VALUE!"), ('=LEN("héllo")', 5), ('=TRIM("  a   b  ")', "a b"), ('=UPPER("aB")', "AB"),
     ('=PROPER("hELLO o\'neil 2nd")', "Hello O'Neil 2Nd"), ('=PROPER(S!B1&" éa ÉB")', "X Éa Éb"),
+    ('=PROPER("")', ""),  # DuckDB 2.0.1: string_split('', '') is [] not [''], so an empty text became NULL
     ('=SUBSTITUTE("a-b-c", "-", "+")', "a+b+c"),
     ('=SUBSTITUTE("a-b-c", "-", "+", 2)', "a-b+c"), ('=SUBSTITUTE("a-b", "-", "+", 5)', "a-b"),
     ('=REPLACE("abcdef", 2, 3, "XY")', "aXYef"), ('=FIND("c", "abcabc")', 3), ('=FIND("C", "abcabc")', "#VALUE!"),
@@ -15,6 +16,8 @@ CASES = [  # formula, Excel's answer (Microsoft's function reference)
     ('=SEARCH("~?", "a?b")', 2), ('=REPT("ab", 3)', "ababab"), ('=VALUE(" 12.5 ")', 12.5), ('=VALUE("x")', "#VALUE!"),
     ('=EXACT("a", "A")', False), ("=CHAR(65)", "A"), ("=CHAR(128)", "€"), ("=CHAR(0)", "#VALUE!"),
     ('=CLEAN("a"&CHAR(9)&"b")', "ab"), ('=TEXT(1234.567, "#,##0.00")', "1,234.57"), ('=TEXT(2.675, "0.00")', "2.68"),
+    ('=TEXT(0, "0.00")', "0.00"),  # the literal-zero shape: the compile-time constant must not raise
+    ('=TEXT(1.005, "0.00")', "1.01"),  # 15 digits then half away from zero, as ROUND(1.005,2); round(x,2) gave 1.00
     ('=TEXT(0.256, "0.0%")', "25.6%"), ('=TEXT(-1234.5, "#,##0")', "-1,235"), ('=TEXT("abc", "0.00")', "abc"),
     ('=DEC2HEX(100, 4)', "0064"), ('=DEC2HEX(-54)', "FFFFFFFFCA"), ('=DEC2HEX(100)', "64"),
     ('=DEC2HEX(-1)', "FFFFFFFFFF"), ('=DEC2HEX(-549755813888)', "8000000000"),
@@ -76,6 +79,17 @@ CASES = [  # formula, Excel's answer (Microsoft's function reference)
 ]
 
 
+def test_a_text_format_rounds_like_round_does():
+    # both must say 1.01 and 0.29: TEXT rounds the 15-significant-digit value, as ROUND does, not the raw double
+    book = book_of({"S": {"A1": 1.005, "A2": 0.285, "A3": 2.675,
+                          "B1": ('=TEXT(A1,"0.00")', "1.01"), "B2": ('=TEXT(A2,"0.00")', "0.29"),
+                          "B3": ('=TEXT(A3,"0.00")', "2.68"),
+                          "C1": ("=ROUND(A1,2)", 1.01), "C2": ("=ROUND(A2,2)", 0.29), "C3": ("=ROUND(A3,2)", 2.68)}})
+    got = execute(book, compile_book(book))
+    for row in (1, 2, 3):
+        assert got[("S", row, 2)][2] == f"{got[('S', row, 3)][1]:.2f}", row
+
+
 def test_text_functions():
     book = book_of({"S": {"B1": "x", "B2": 2.5, "B3": True, "C1": "p", "C3": "q"},
                     "F": {f"A{i}": (f, v) for i, (f, v) in enumerate(CASES, 1)}})
@@ -92,6 +106,21 @@ def test_text_functions():
             assert (kind, t) == ("e", want), formula
         else:
             assert (kind, t) == ("s", want), (formula, t)
+
+
+def test_a_huge_value_keeps_its_digits_and_does_not_lose_the_batch():
+    # TEXT scales the value by 10^decimals before rounding, and Postgres raises on float8 overflow where DuckDB
+    # returns inf: one such cell used to make Postgres refuse the whole statement, turning every cell in the batch
+    # UNRESOLVED. A value too large to scale keeps the digits a plain format showed before (its own FAIL, not a
+    # dead batch); a percent has no answer without scaling, so it is NULL and FAILs visibly.
+    book = book_of({"S": {"A1": 1e308, "A2": 1e-320, "A3": 2.675,
+                          "B1": ('=TEXT(A1,"0.00")', "1e308"), "B2": ('=TEXT(A2,"0.00")', "0.00"),
+                          "B3": ('=TEXT(A3,"0.00")', "2.68"), "B4": ('=TEXT(A1,"0%")', "1e308%")}})
+    got = execute(book, compile_book(book))
+    assert str(got[("S", 1, 2)][2]).startswith("10000000000000000")   # unscaled digits, as 1.1.1 had them
+    assert got[("S", 2, 2)][2] == "0.00"
+    assert got[("S", 3, 2)][2] == "2.68"
+    assert got[("S", 4, 2)][2] is None                                # no percent of a value that cannot be scaled
 
 
 def test_unsupported_text_forms_say_why():

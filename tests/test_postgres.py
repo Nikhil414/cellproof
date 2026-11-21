@@ -86,7 +86,7 @@ def test_rounding_ties_go_away_from_zero_on_postgres(con):
     "SELECT array_to_string(list_transform(list_zip(string_split('ab cD-éx', ''), list_concat([' '], "
     "string_split('ab cD-éx', ''))), lambda x: CASE WHEN regexp_matches(x[2], '\\p{L}') THEN lower(x[1]) "
     "ELSE upper(x[1]) END), '') AS v",                       # PROPER
-    "SELECT len(string_split('', '')) AS v",                 # '' splits into ['']
+    "SELECT len(string_split('ab', '')) AS v",               # '' splits into characters, not one piece
     "SELECT printf('%.2f', 1234.5678) AS v",                 # TEXT(x, "0.00")
     "SELECT printf('%.0f', 0.5) AS v",                       # ties to even, as C
     "SELECT printf('%.3e', 1234.5678) AS v",
@@ -118,6 +118,25 @@ def test_proper_verifies_on_postgres(con):
     got = {v.key: (v.status, v.actual) for v in postgres.verify(book, compile_book(book), con)}
     assert {s for s, _ in got.values()} == {"PASS"}, got
 
+
+def test_empty_text_survives_proper_and_substitute_on_postgres(con):
+    # DuckDB 2.0.1 made string_split('', '') return [] instead of [''], which turned PROPER("") into NULL and every
+    # cell reading it into a false FAIL. The functions guard the empty text; this pins that on the Postgres target too.
+    book = book_of({"S": {"A1": "", "A2": "a-b-c", "A3": "-",
+                          "B1": ('=PROPER("")', ""), "B2": ('=PROPER(A1)', ""),
+                          "B3": ('=SUBSTITUTE("","","x")', ""), "B4": ('=SUBSTITUTE(A1,"a","x")', ""),
+                          "B5": ('=SUBSTITUTE(A2,A3,"+")', "a+b+c")}})
+    got = {v.key: (v.status, v.actual) for v in postgres.verify(book, compile_book(book), con)}
+    assert {s for s, _ in got.values()} == {"PASS"}, got
+
+
+def test_rounding_a_tie_at_the_text_format_on_postgres(con):
+    # TEXT(x, "0.00") rounds the value Excel shows, half away from zero; DuckDB 2.0.1's round(double, n) ties to even
+    book = book_of({"S": {"A1": ("=TEXT(2.675,\"0.00\")", "2.68"), "A2": ("=TEXT(8.835,\"0.00\")", "8.84"),
+                          "A3": ("=TEXT(2.5,\"0\")", "3"), "A4": ("=TEXT(1234.567,\"#,##0.00\")", "1,234.57"),
+                          "A5": ("=TEXT(0,\"0.00\")", "0.00"), "A6": ("=TEXT(-0.004,\"0.00\")", "0.00")}})
+    got = {v.key: (v.status, v.actual) for v in postgres.verify(book, compile_book(book), con)}
+    assert {s for s, _ in got.values()} == {"PASS"}, got
 
 
 def test_boolean_index_and_error_spill_on_postgres(con, tmp_path):
