@@ -10,6 +10,7 @@ formula cells; batches keep every statement small.
 from __future__ import annotations
 
 import csv
+from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from pathlib import Path
@@ -17,7 +18,7 @@ from pathlib import Path
 import cellproof.fn  # noqa: F401  (registers the function library)
 from openpyxl.utils import range_boundaries
 
-from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, bool_num, any_of, compare, error, errs, finalize, lit_num, lit_str, num,
+from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, bool_num, any_of, compare, error, errs, finite_num, finalize, lit_num, lit_str, num,
                           txt, where_cell)
 from cellproof.fn.dynamic import DYNAMIC, spill_batch
 from cellproof.functions import FUNCS
@@ -42,6 +43,7 @@ TOO_BIG = "formula's SQL would be too large to run"
 # IFERROR/division repeat their arguments in the value and the error SQL, so SQL can double per
 # nesting level; checking every node keeps memory near this bound (200k-cell workbooks stay < 10 KB/cell)
 MAX_SQL = 1_000_000
+BIND_SQL = 1_500  # keep repeated arithmetic and overflow checks within bounded chunks
 # A batch closes at BATCH cells or when its SQL weighs BATCH_WEIGHT characters, whichever comes first. Time inside one
 # statement grows faster than linearly with its cell count, and lookups are far heavier than plain arithmetic, so a
 # count alone makes lookup-heavy batches slow (measured on DuckDB 1.5.6: 25 VLOOKUP cells 0.2 s, 250 cells 17.8 s).
@@ -62,6 +64,7 @@ class Step:
     key: Key
     expr: Expr
     cte: str  # its CTE name inside its batch
+    bindings: tuple[str, ...] = ()
 
 
 def step_weight(e: Expr) -> int:
@@ -122,6 +125,7 @@ class Compiler:
         self.findings: list[str] = []
         self.index = RangeIndex(book)
         self.rowrefs: dict[str, Expr] | None = None  # same-row placeholders of a region (see regions)
+        self.bind_arithmetic: Callable[[Expr], Expr] | None = None
         self.at: Key | None = None  # the formula cell being compiled in cell mode (implicit intersection)
         self.ctx: list[str] = []  # what consumes the node being compiled: "op", "fn" or "pass" (PASS_THROUGH)
         self.wid = 0  # unique aliases w1, w2... for the element sources of one array argument
@@ -200,8 +204,15 @@ class Compiler:
 
     def expr(self, node, sheet: str) -> Expr:
         e = self._expr(node, sheet)
-        if sum(len(part) for part in (e.sql, e.err, e.txt, e.kind)) > MAX_SQL:
+        size = sum(len(part) for part in (e.sql, e.err, e.txt, e.kind))
+        if size > MAX_SQL:
             raise Unsupported(TOO_BIG)
+        # Bind only scalar arithmetic under operators. Function arguments can be lazy
+        # or depend on a local SQL scope, and must stay where they were compiled.
+        if (self.bind_arithmetic is not None and self.spill is None and size > BIND_SQL
+                and e.type == "num" and isinstance(node, Binary) and node.op in ARITH
+                and self.ctx and all(parent == "op" for parent in self.ctx)):
+            return self.bind_arithmetic(e)
         return e
 
     def _expr(self, node, sheet: str) -> Expr:
@@ -260,9 +271,9 @@ class Compiler:
         if op in ARITH or op in ("/", "^"):
             x, y = num(a), num(b)
             if op in ARITH:
-                return Expr(f"({x.sql} {op} {y.sql})", "num", errs(x.err, y.err))
+                return finite_num(f"({x.sql} {op} {y.sql})", errs(x.err, y.err))
             if op == "/":  # DuckDB gives inf, Excel #DIV/0!
-                return Expr(f"({x.sql} / NULLIF({y.sql}, 0))", "num",
+                return finite_num(f"({x.sql} / NULLIF({y.sql}, 0))",
                             errs(x.err, y.err, f"(CASE WHEN {y.sql} = 0 THEN '#DIV/0!' END)"))
             # DuckDB POWER returns inf or nan where Excel returns an error (verified on 1.5.6)
             # Real Excel: (-8)^(1/3) is -1.9999999999999998, the real cube root: a negative number to the power of
@@ -273,8 +284,8 @@ class Compiler:
             bad = (f"(CASE WHEN {x.sql} = 0 AND {y.sql} < 0 THEN '#DIV/0!' "
                    f"WHEN {x.sql} = 0 AND {y.sql} = 0 THEN '#NUM!' "
                    f"WHEN {x.sql} < 0 AND {y.sql} <> FLOOR({y.sql}) AND NOT {odd_root} THEN '#NUM!' END)")
-            return Expr(f"(CASE WHEN {odd_root} THEN -POWER(-{x.sql}, {y.sql}) ELSE POWER({x.sql}, {y.sql}) END)",
-                        "num", errs(x.err, y.err, bad))
+            return finite_num(f"(CASE WHEN {odd_root} THEN -POWER(-{x.sql}, {y.sql}) ELSE POWER({x.sql}, {y.sql}) END)",
+                              errs(x.err, y.err, bad))
         if op == "&":
             x, y = txt(a), txt(b)
             return Expr(f"({x.sql} || {y.sql})", "txt", errs(x.err, y.err))
@@ -456,13 +467,31 @@ def compile_book(book: Book, regions: bool = True) -> Compiled:
         if current and (len(current) >= BATCH or weight >= BATCH_WEIGHT):
             _close(comp, batches, current)
             weight = 0
-        try:
+        def compile_step() -> Step:
+            name = f"c{len(current) + 1}"
+            bindings: list[str] = []
+
+            def bind(e: Expr) -> Expr:
+                cte = f"{name}_expr{len(bindings) + 1}"
+                bindings.append(f"{cte} AS MATERIALIZED (SELECT {e.sql} AS v, CAST({e.err} AS VARCHAR) AS e)")
+                return Expr(f"(SELECT v FROM {cte})", "num", f"(SELECT e FROM {cte})")
+
+            comp.bind_arithmetic = bind
             try:
                 e = comp.compile_cell(cell)
+                if sum(map(len, bindings)) + step_weight(e) > MAX_SQL:
+                    raise Unsupported(TOO_BIG)
+                return Step(key, e, name, tuple(bindings))
+            finally:
+                comp.bind_arithmetic = None
+
+        try:
+            try:
+                step = compile_step()
             except NewBatch:
                 _close(comp, batches, current)
                 weight = 0
-                e = comp.compile_cell(cell)  # the open batch is empty now, so this can't raise NewBatch
+                step = compile_step()  # the open batch is empty now, so this can't raise NewBatch
         except Unsupported as err:
             unresolved[key] = str(err)
             if err.dep is not None:
@@ -471,10 +500,10 @@ def compile_book(book: Book, regions: bool = True) -> Compiled:
         except RecursionError:  # Python's stack, not DuckDB's: DuckDB took 900 nesting levels in tests
             unresolved[key] = DEEP
             return
-        step = Step(key, e, f"c{len(current) + 1}")
+        e = step.expr
         comp.open[key] = (step.cte, e.type, e.err != NO_ERR)
         current.append(step)
-        weight += step_weight(e)
+        weight += step_weight(e) + sum(map(len, step.bindings))
 
     for key in order:
         if key in inside:
@@ -524,8 +553,12 @@ def cell_row(typ: str, v: str, e: str, t: str, k: str) -> tuple[str, str, str]:
 
 def render_batch(steps: list[Step], prev: str, own_only: bool = False) -> str:
     """One batch as a SELECT: the new row of every cell this batch computes, after every row of `prev` unless own_only."""
-    ctes = ",\n".join(f"{s.cte} AS MATERIALIZED (SELECT {s.expr.sql} AS v, CAST({s.expr.err} AS VARCHAR) AS e, "
-                      f"CAST({s.expr.txt} AS VARCHAR) AS t, CAST({s.expr.kind} AS VARCHAR) AS k)" for s in steps)
+    ctes = ",\n".join(
+        cte for s in steps for cte in (*s.bindings, (
+            f"{s.cte} AS MATERIALIZED (SELECT {s.expr.sql} AS v, CAST({s.expr.err} AS VARCHAR) AS e, "
+            f"CAST({s.expr.txt} AS VARCHAR) AS t, CAST({s.expr.kind} AS VARCHAR) AS k)"
+        ))
+    )
     rows = []
     for s in steps:
         sheet, row, col = s.key

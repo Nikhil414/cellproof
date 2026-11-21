@@ -1,6 +1,6 @@
 """Compile a Region into one set-based statement.
 
-A region becomes a wide model (a short pivot of the columns it reads, then one CTE per formula column holding the
+A region becomes a wide model (a short pivot of the columns it reads, then CTEs for the formula columns holding the
 readable expression) and a mechanical unpivot of that model into long `cells` rows, which is what later batches read
 and what the verifier compares. The expressions come from the same Compiler as cell mode, with a different reader for
 same-row references, so every Excel rule carries over unchanged.
@@ -13,7 +13,7 @@ from functools import lru_cache
 import duckdb
 from openpyxl.utils.cell import get_column_letter
 
-from cellproof.compiler import DEEP, INPUT_COLUMNS, Compiler, Step, a1, cell_row
+from cellproof.compiler import DEEP, INPUT_COLUMNS, MAX_SQL, TOO_BIG, Compiler, Step, a1, cell_row, step_weight
 from cellproof.expr import CELLS, NO_ERR, Expr, any_of, errs, finalize, lit_str, num
 from cellproof.functions import note_text_numbers, range_sum
 from cellproof.model import Book, Unsupported
@@ -249,6 +249,14 @@ def compile_region(comp: Compiler, region: Region):
             n = names[c]
             sums: list[str] = []  # the growing SUMs' window columns, then the running total's per-row term
             terms: list[str] = []
+            bindings: list[list[str]] = []
+
+            def bind(e: Expr) -> Expr:
+                name = f"{n}__expr{len(bindings) + 1}"
+                bindings.append([f"{e.sql} AS {name}", f"CAST({e.err} AS VARCHAR) AS {name}__err"])
+                return Expr(q + name, "num", f"{q}{name}__err")
+
+            comp.bind_arithmetic = bind
             try:
                 if not (all(growing_safe(book, region, s, k) for s, k in region.runs.get(c, []))
                         and (c not in region.recur or recurrence_safe(book, region, c))):
@@ -259,18 +267,26 @@ def compile_region(comp: Compiler, region: Region):
                 e = finalize(comp.expr(region.template[c], region.sheet))
                 if c in region.recur:
                     e = recurrence(comp, region, c, e, n, terms)
+                if sum(len(item) for layer in bindings for item in layer) + step_weight(e) > MAX_SQL:
+                    raise Unsupported(TOO_BIG)
             except Unsupported as err:
                 rejected[c] = ROWREF_REASON if "__ROWREF_" in str(err) else str(err)
                 continue
             except RecursionError:
                 rejected[c] = DEEP
                 continue
+            finally:
+                comp.bind_arithmetic = None
             extra = [f"{e.sql} AS {n}"]
             if e.err != NO_ERR:
                 extra.append(f"CAST({e.err} AS VARCHAR) AS {n}__err")
             if e.type == "any":
                 extra += [f"CAST({e.txt} AS VARCHAR) AS {n}__t", f"CAST({e.kind} AS VARCHAR) AS {n}__k"]
-            extras[c] = [layer for layer in (sums, terms) if layer] + [extra]
+            extras[c] = [(sums, False)] if sums else []
+            extras[c].extend((layer, True) for layer in bindings)
+            if terms:
+                extras[c].append((terms, False))
+            extras[c].append((extra, False))
             out_exprs[c] = e
             order.append(c)
             err = f"{q}{n}__err" if e.err != NO_ERR else NO_ERR
@@ -305,9 +321,10 @@ def compile_region(comp: Compiler, region: Region):
             src = f"src AS (SELECT row_num FROM range({region.r1}, {region.r2 + 1}) AS t(row_num))"
         layers, prev = [], "src"
         for c in accepted:
-            for i, items in enumerate(extras[c], 1):
+            for i, (items, bound) in enumerate(extras[c], 1):
                 cte = names[c] if i == len(extras[c]) else f"{names[c]}__p{i}"  # no SQL name holds "__" otherwise
-                layers.append(f"{cte} AS (\n  SELECT *, " + ", ".join(items) + f"\n  FROM {prev} AS _)")
+                materialized = " MATERIALIZED" if bound else ""
+                layers.append(f"{cte} AS{materialized} (\n  SELECT *, " + ", ".join(items) + f"\n  FROM {prev} AS _)")
                 prev = cte
         cols = [c for c in region.cols if c in accepted]
         select = ["row_num"]
