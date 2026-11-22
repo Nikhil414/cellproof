@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0 (unreleased)
+## 1.2.0 (2026-11-22)
 
 - **`cellproof diff old.xlsx new.xlsx`: what changed between two versions, and what it broke.** Both workbooks are
   verified exactly as `convert` verifies them, so every verdict is one `convert` would give. It reports, with counts:
