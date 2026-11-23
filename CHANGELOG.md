@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed: `cellproof diff` could miss a change inside a long arithmetic formula.** A formula too big to keep as one
+  expression has its sub-results bound into numbered layers, so what the cell actually computes is split across them.
+  The comparison read only the outer expression, so two different long formulas could compare as the same SQL: a
+  change that exists but is never reported. The layers are now part of the compared text. The same fix covers the
+  other direction: a cell that moves to a different position in its batch used to be renumbered and could report a
+  fake "SQL changed", because the layer names carry that position. A compared SQL that now runs long is prefixed in
+  `DIFF.md` (the whole of it stays in `diff.json`), so one change cannot make an unreadable table row.
+- **`README` says what happens between Excel's two ceilings.** A result above 9.99e307 is already `#NUM!` in Excel
+  while DuckDB can still hold it (up to 1.79e308). Only a non-finite result is turned into `#NUM!`, so such a cell
+  FAILs honestly instead of passing. Nothing is guessed.
+
 ## 1.2.0 (2026-11-22)
 
 - **`cellproof diff old.xlsx new.xlsx`: what changed between two versions, and what it broke.** Both workbooks are

@@ -6,7 +6,7 @@ import json
 from xlsxkit import write_xlsx
 
 from cellproof.cli import main
-from cellproof.diff import compare
+from cellproof.diff import _sqls, compare
 
 
 def _book(spec, names=None):
@@ -96,6 +96,20 @@ def test_a_batch_boundary_moving_does_not_shift_the_canonical_sql():
     assert d["sql"] == []
 
 
+def test_a_long_arithmetic_cell_moving_batch_position_does_not_shift_its_sql():
+    """A chain long enough to bind its sub-results names them `cN_exprM`, N being the batch position: a cell that
+    moves to another position must not read as different SQL, and the bound values must still be told apart."""
+    term = "1.2345678901234567"
+    chain = "=" + "+".join([term] * 120)  # over BIND_SQL, so the compiler binds 19 sub-results
+    value = 120 * float(term)
+    old = _book({"S": {"B1": (chain, value)}})
+    new = _book({"S": {"A1": ("=1+1", 2), "B1": (chain, value)}})  # A1's formula takes c1, so B1 is now c2
+    assert compare(old, new)["sql"] == []
+
+    other = "=" + "+".join(["2.5"] + [term] * 119)  # same length, the first term differs (inside a binding)
+    assert _sqls(old)[("S", 1, 2)] != _sqls(_book({"S": {"B1": (other, value)}}))[("S", 1, 2)]
+
+
 def test_a_region_column_becoming_cell_mode_does_not_shift_sql_either():
     """Regions change how cells are compiled, not what they read: the SQL comparison uses cell mode on both."""
     spec = {"A1": 1, "A2": 2, "A3": 3, "B1": ("=A1*2", 2), "B2": ("=A2*2", 4), "B3": ("=A3*2", 6)}
@@ -103,6 +117,26 @@ def test_a_region_column_becoming_cell_mode_does_not_shift_sql_either():
     new = _book({"S": dict(spec, **{"B4": ("=A4*2", 8), "A4": 4})})
     d = compare(old, new)
     assert d["sql"] == []  # B1-B3 still read the same cells
+
+
+def test_a_changed_long_formula_is_reported_without_dumping_the_whole_expression_into_the_page(tmp_path):
+    """A long formula whose text is unchanged but which reads a named range that grew: the compared SQL is tens of
+    thousands of characters, so diff.json keeps all of it and DIFF.md gets a prefix."""
+    chain = "=SUM(Rate)" + "".join("+1.2345678901234567" for _ in range(120))  # over BIND_SQL, so it is bound
+    old, new = tmp_path / "old.xlsx", tmp_path / "new.xlsx"
+    fill = {f"D{i}": i for i in range(1, 10)}  # enough saved-value changes for DIFF.md to be worth writing
+    write_xlsx(old, {"S": {"A1": 1, "A2": 2, "B1": (chain, 151.1), **fill}},
+               names={"Rate": "S!$A$1:$A$2"})
+    write_xlsx(new, {"S": {"A1": 1, "A2": 2, "A3": 5, "B1": (chain, 156.1), **{k: v + 1 for k, v in fill.items()}}},
+               names={"Rate": "S!$A$1:$A$3"})
+    out = tmp_path / "out"
+    main(["diff", str(old), str(new), "--out", str(out)])
+    data = json.loads((out / "diff.json").read_text(encoding="utf-8"))
+    assert [s["cell"] for s in data["sql"]] == ["S!B1"]
+    assert len(data["sql"][0]["was"]) > 10_000  # the evidence is whole in the json
+    md = (out / "DIFF.md").read_text(encoding="utf-8")
+    assert "more characters in diff.json" in md
+    assert max(len(line) for line in md.splitlines()) < 5_000  # no row is unusable
 
 
 def test_nothing_changed_says_so_plainly():

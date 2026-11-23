@@ -361,7 +361,9 @@ cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each re
   The synthetic fixtures use values within Excel's cell entry limit. The cases expecting `#NUM!` exceed its
   [formula result limit](https://support.microsoft.com/en-us/excel/excel-specifications-and-limits).
   PostgreSQL can raise a numeric overflow error before the check runs, leaving the affected batch unresolved.
-  Overflow inside aggregate functions can still become `inf` on DuckDB.
+  Overflow inside aggregate functions can still become `inf` on DuckDB. A formula result between 9.99e307 and
+  1.79e308 is finite on DuckDB but `#NUM!` in Excel, and only a non-finite result becomes `#NUM!` here: such a cell
+  FAILs honestly (DuckDB's number against Excel's saved `#NUM!`), never PASSes.
 - **Speed:** regions cover columns that repeat one formula over the same rows, lookups and *IF(S) criteria included.
   A formula that is not part of such a column runs cell by cell (a lookup alone: about 7 s per 1,000). Running totals
   other than plain sums (`=C1*1.05+B2`, `=MAX(C1,B2)`) also run cell by cell.

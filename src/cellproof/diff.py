@@ -50,8 +50,14 @@ def _canonical(step, names: dict[str, str]) -> str:
     from the table (`SELECT num ... WHERE row_num = 3`), one still open in the same batch from its CTE
     (`SELECT v FROM c7`), and a boolean keeps a `<> 0` wrapper on one path only. Normalising all of them to
     `(SELECT num FROM <Sheet!A3>)` makes a moving batch boundary, or a renumbered CTE, invisible; a cell that really
-    reads something else keeps its difference. The error expression is part of the SQL for the same reason."""
+    reads something else keeps its difference. The error expression is part of the SQL for the same reason. A long
+    arithmetic cell keeps its sub-results in separate `cN_exprM` bindings, so their bodies are compared too: a change
+    inside one of them is a real change, and leaving them out made two different formulas look alike."""
     sql = step.expr.sql + " ||ERR|| " + step.expr.err
+    if step.bindings:
+        # The binding's own name carries the batch position, so keep the body (which is what the formula computed)
+        # and let the numbering in `names` normalise the references to it.
+        sql += " ||BIND|| " + " ||BIND|| ".join(b.partition(" AS MATERIALIZED ")[2] for b in step.bindings)
     for cte, tag in names.items():  # this batch's names -> the cells they hold
         sql = re.sub(rf"\bFROM {cte}\b", "FROM " + tag, sql)
     sql = _CELL_READ.sub(lambda m: "FROM " + _tag((m.group(1).replace("''", "'"), int(m.group(2)), int(m.group(3)))),
@@ -68,7 +74,15 @@ def _sqls(book: Book) -> dict[Key, str]:
     compiled = compile_book(book, regions=False)
     out: dict[Key, str] = {}
     for batch in compiled.batches:
-        names = {step.cte: _tag(step.key) for step in batch}
+        names: dict[str, str] = {}
+        for step in batch:
+            tag = _tag(step.key)
+            names[step.cte] = tag
+            # A long arithmetic cell binds its own sub-results under `cN_exprM`, where N is its batch position, so a
+            # cell that moves position must not read as different SQL. The number stays: it is the order the cell
+            # bound them in, which is a property of the formula.
+            for n in range(1, len(step.bindings) + 1):
+                names[f"{step.cte}_expr{n}"] = f"{tag}#{n}"
         for step in batch:
             out[step.key] = _canonical(step, names)
     return out
@@ -178,6 +192,15 @@ def _row(values) -> str:
     return "| " + " | ".join(_md(v) for v in values) + " |"
 
 
+def _md_sql(sql: str | None) -> str:
+    """A compared SQL in the markdown table, truncated: a long formula's text can run to tens of thousands of
+    characters, which no table row survives. The whole of it stays in diff.json, which is the evidence. Escaping is
+    left to `_row`, so this must not escape."""
+    if sql is None or len(sql) <= 800:
+        return sql
+    return f"{sql[:800]}... ({len(sql) - 800:,} more characters in diff.json)"
+
+
 def _table(head: tuple[str, ...], rows: list[tuple], cap: int = 100) -> list[str]:
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     lines += [_row(r) for r in rows[:cap]]
@@ -229,7 +252,8 @@ def write_diff(data: dict, out: Path, old_name: str, new_name: str) -> Path | No
                   "The formula text is unchanged, but what it reads moved: a named range grew or shrank, a table "
                   "gained rows, a range's corner moved. Without this section the two versions look alike and answer "
                   "differently.", ""]
-        lines += _table(("Cell", "Old SQL", "New SQL"), [(s["cell"], s["was"], s["now"]) for s in data["sql"]])
+        lines += _table(("Cell", "Old SQL", "New SQL"),
+                        [(s["cell"], _md_sql(s["was"]), _md_sql(s["now"])) for s in data["sql"]])
     if data["text"]:
         lines += ["", "## Formula text that changed", ""]
         lines += _table(("Cell", "Was", "Now"), [(t["cell"], t["was"] or "(was an input)", t["now"] or "(is now an "
