@@ -358,9 +358,10 @@ cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each re
   is slower. Elsewhere SQL can still differ from Excel in the last digits, which would show as an honest FAIL. A
   non-finite result from `+`, `-`, `*`, `/` or `^` becomes `#NUM!` on DuckDB, following
   [Microsoft's documented overflow behavior](https://support.microsoft.com/en-us/excel/how-to-correct-a-num-error).
-  The overflow regressions use synthetic inputs and documentation-derived expectations. PostgreSQL can raise a
-  numeric overflow error before the check runs, leaving the affected batch unresolved. Overflow inside aggregate
-  functions can still become `inf` on DuckDB.
+  The synthetic fixtures use values within Excel's cell entry limit. The cases expecting `#NUM!` exceed its
+  [formula result limit](https://support.microsoft.com/en-us/excel/excel-specifications-and-limits).
+  PostgreSQL can raise a numeric overflow error before the check runs, leaving the affected batch unresolved.
+  Overflow inside aggregate functions can still become `inf` on DuckDB.
 - **Speed:** regions cover columns that repeat one formula over the same rows, lookups and *IF(S) criteria included.
   A formula that is not part of such a column runs cell by cell (a lookup alone: about 7 s per 1,000). Running totals
   other than plain sums (`=C1*1.05+B2`, `=MAX(C1,B2)`) also run cell by cell.

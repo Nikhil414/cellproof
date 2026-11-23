@@ -95,15 +95,17 @@ def test_error_codes_must_match_exactly():
 def test_arithmetic_overflow_in_cells_and_regions():
     from cellproof.verifier import verify
 
+    # The synthetic inputs are below Excel's entry limit. The expected
+    # overflow errors follow Microsoft's documented limits and #NUM! rule.
     sheet = {}
     for row in range(1, 5):
-        sheet[f'A{row}'] = 1e308
+        sheet[f'A{row}'] = 9e307
         for col, formula in zip('BCDEF', [f'A{row}+A{row}', f'-A{row}-A{row}',
                                          f'A{row}*10', f'A{row}/0.1', f'A{row}^2']):
             sheet[f'{col}{row}'] = ('=' + formula, '#NUM!')
         sheet[f'G{row}'] = (f'=IFERROR(B{row},7)', 7)
         sheet[f'H{row}'] = (f'=A{row}/0', '#DIV/0!')
-        sheet[f'I{row}'] = (f'=A{row}/10', 1e307)
+        sheet[f'I{row}'] = (f'=A{row}/10', 9e306)
     book = book_of({'S': sheet})
     for regions in (False, True):
         compiled = compile_book(book, regions=regions)
@@ -116,7 +118,7 @@ def test_arithmetic_overflow_in_cells_and_regions():
 def test_arithmetic_overflow_in_arrays():
     from cellproof.verifier import verify
 
-    sheet = {'A1': 1e308, 'A2': 1e308}
+    sheet = {'A1': 9e307, 'A2': 9e307}
     for row, formula in enumerate(['A1:A2+A1:A2', '-A1:A2-A1:A2', 'A1:A2*10',
                                    'A1:A2/0.1', 'A1:A2^2'], 1):
         sheet[f'B{row}'] = (f'=SUM({formula})', '#NUM!')
@@ -135,7 +137,7 @@ def test_long_arithmetic_retains_intermediate_errors_without_expanding_sql():
     total = '+'.join(sheet)
     sheet['B1'] = ('=' + total, 200)
     sheet['B2'] = ('=Z1*10+' + total + '+1/0', '#NUM!')
-    sheet['Z1'] = 1e308
+    sheet['Z1'] = 9e307
     book = book_of({'S': sheet})
     compiled = compile_book(book, regions=False)
     assert not compiled.unresolved
@@ -149,7 +151,7 @@ def test_overflowing_criteria_are_unresolved_without_guessing_excel_behavior():
     from cellproof.verifier import verify
 
     book = book_of({'S': {
-        'A1': 1e308, 'A2': 1,
+        'A1': 9e307, 'A2': 1,
         'B1': ('=COUNTIF(A1:A2,A1*10)', 0),
         'B2': ('=SUMIF(A1:A2,A1*10)', 0),
         'B3': ('=IFERROR(COUNTIF(A1:A2,A1*10),7)', 7),

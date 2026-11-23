@@ -544,7 +544,7 @@ def test_wide_region_keeps_arithmetic_errors_without_expanding_sql():
     for r in range(1, 11):
         spec.update({f"{col}{r}": 1 for col in terms})
         if r == 5:
-            spec[f"A{r}"] = spec[f"B{r}"] = 1e308
+            spec[f"A{r}"] = spec[f"B{r}"] = 9e307
         total = "+".join(f"{col}{r}" for col in terms)
         spec[f"{result}{r}"] = ("=" + total, "#NUM!" if r == 5 else 240)
 
