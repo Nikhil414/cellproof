@@ -72,9 +72,20 @@ def _table_xml(tid, name, ref, columns, totals):
             + f'><tableColumns count="{len(columns)}">{cols}</tableColumns></table>')
 
 
-def write_xlsx(path, sheets, names=None, tables=None):
+def _calc_xml(calc) -> str:
+    """`calc` is a dict of `<calcPr>` attributes, like {"calcMode": "manual", "fullCalcOnLoad": True,
+    "calcId": 191029}; True/False are written as 1/0 the way Excel writes them."""
+    if not calc:
+        return ""
+    attrs = {k: ("1" if v is True else "0" if v is False else str(v)) for k, v in calc.items()}
+    return "<calcPr" + "".join(f' {k}="{escape(v, {chr(34): "&quot;"})}"' for k, v in attrs.items()) + "/>"
+
+
+def write_xlsx(path, sheets, names=None, tables=None, calc=None, app=""):
     """sheets: {"Sheet": {"A1": 2, "A2": ("=A1*2", 4)}}; names: {"Rate": "'My Sheet'!$A$1"};
-    tables: {"Sheet": [("Sales", "A1:C5", ["Rep", "Region", "Amount"], totals_rows)]}."""
+    tables: {"Sheet": [("Sales", "A1:C5", ["Rep", "Region", "Amount"], totals_rows)]};
+    calc: <calcPr> attributes, e.g. {"calcMode": "manual", "calcId": 191029}; app: the `docProps/app.xml`
+    Application ("Microsoft Excel"), which cellproof reports as "last saved by"."""
     n = len(sheets)
     tables = tables or {}
     table_parts, tid = [], 0  # (sheet number, table number, xml)
@@ -97,11 +108,17 @@ def write_xlsx(path, sheets, names=None, tables=None):
         + "".join(f'<Override PartName="/xl/tables/table{t}.xml" '
                   'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>'
                   for _, t, _ in table_parts)
+        + ('<Override PartName="/docProps/app.xml" '
+           'ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>' if app else "")
         + "</Types>"
     )
     root_rels = (
         f'{XML_HEAD}<Relationships xmlns="{PKG}"><Relationship Id="rId1" '
-        f'Type="{REL}/officeDocument" Target="xl/workbook.xml"/></Relationships>'
+        f'Type="{REL}/officeDocument" Target="xl/workbook.xml"/>'
+        + ('<Relationship Id="rId2" '
+           'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" '
+           f'Target="docProps/app.xml"/>' if app else "")
+        + "</Relationships>"
     )
     sheet_tags = "".join(
         f'<sheet name="{escape(name, {chr(34): "&quot;"})}" sheetId="{i}" r:id="rId{i}"/>'
@@ -109,7 +126,8 @@ def write_xlsx(path, sheets, names=None, tables=None):
     )
     defined = "".join(f'<definedName name="{k}">{escape(v)}</definedName>' for k, v in (names or {}).items())
     defined = f"<definedNames>{defined}</definedNames>" if defined else ""
-    workbook = f'{XML_HEAD}<workbook xmlns="{MAIN}" xmlns:r="{REL}"><sheets>{sheet_tags}</sheets>{defined}</workbook>'
+    workbook = (f'{XML_HEAD}<workbook xmlns="{MAIN}" xmlns:r="{REL}"><sheets>{sheet_tags}</sheets>{defined}'
+                f'{_calc_xml(calc)}</workbook>')
     wb_rels = (
         f'{XML_HEAD}<Relationships xmlns="{PKG}">'
         + "".join(
@@ -123,6 +141,10 @@ def write_xlsx(path, sheets, names=None, tables=None):
         z.writestr("_rels/.rels", root_rels)
         z.writestr("xl/workbook.xml", workbook)
         z.writestr("xl/_rels/workbook.xml.rels", wb_rels)
+        if app:
+            z.writestr("docProps/app.xml",
+                       f'{XML_HEAD}<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/'
+                       f'extended-properties"><Application>{escape(app)}</Application></Properties>')
         for i, cells in enumerate(sheets.values(), 1):
             mine = [(t, xml) for s, t, xml in table_parts if s == i]
             z.writestr(f"xl/worksheets/sheet{i}.xml", _sheet_xml(cells, len(mine)))

@@ -1,5 +1,5 @@
 """cellproof convert WORKBOOK [--out DIR] [--dbt] | cellproof sql WORKBOOK [--sheet S] [--range A1:A9] [--out FILE]
-| cellproof watch WORKBOOK [--interval SECONDS]"""
+| cellproof watch WORKBOOK [--interval SECONDS] | cellproof prove WORKBOOK [--out DIR] | cellproof diff OLD NEW"""
 from __future__ import annotations
 
 import argparse
@@ -8,11 +8,12 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from cellproof import fastread, reader
+from cellproof import diff, fastread, proof, reader
 from cellproof.compiler import NO_VALUE, compile_book
 from cellproof.compute import fill_missing
 from cellproof.emitter import run_dbt, write_project
-from cellproof.impact import impact, wrong
+from cellproof.impact import impact, split_failures, wrong
+from cellproof.model import Book
 from cellproof.query import QueryError, build, check, selection
 from cellproof.reader import SUPPORTED, UnreadableWorkbook, load
 from cellproof.report import readers_text, write_report
@@ -20,19 +21,24 @@ from cellproof.verifier import SqlFailed, verify_book
 from cellproof.watch import Run, run_watch
 
 
-def _load(args):
-    """The workbook, read with the fast loader when --fast, or with openpyxl when that loader cannot.
+def _load_path(path: Path, fast: bool) -> Book:
+    """One workbook, read with the fast loader when it is available, or with openpyxl when that loader cannot.
 
     The fast loader reads each worksheet once instead of twice, and raises UnreadableWorkbook rather than guess
     when it meets something it does not handle; openpyxl then reads the file, so --fast can only be slower."""
-    path = Path(args.workbook)
-    if not getattr(args, "fast", False) or path.suffix.lower() not in SUPPORTED:
+    path = Path(path)
+    if not fast or path.suffix.lower() not in SUPPORTED:
         return load(path)
     try:
         return fastread.load(path)
     except UnreadableWorkbook as err:
         print(f"note: openpyxl is reading {path.name} instead ({err})", file=sys.stderr)
     return load(path)
+
+
+def _load(args):
+    """The workbook named on the command line (see _load_path for how it is read)."""
+    return _load_path(args.workbook, getattr(args, "fast", False))
 
 
 def _value(value) -> str:
@@ -129,6 +135,86 @@ def _watch(args) -> int:
     return run_watch(path, args.interval, args.runs, rerun, err=lambda line: print(line, file=sys.stderr))
 
 
+def _prove(args) -> int:
+    """`cellproof prove`: verify the workbook as `convert` does, then write a bundle someone else can check."""
+    if args.check is not None:
+        workbook = args.check_workbook
+        return proof.check(Path(args.check), workbook)
+    if args.workbook is None:
+        print("error: prove needs a workbook (or --check DIR to re-check a bundle)", file=sys.stderr)
+        return 2
+    try:
+        book = _load(args)
+    except UnreadableWorkbook as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
+    book, computed, why = fill_missing(book, args.workbook)
+    def compile_fn(b):
+        compiled = compile_book(b)
+        if why:
+            compiled.unresolved.update({k: f"{r} ({why})" for k, r in compiled.unresolved.items() if r == NO_VALUE})
+        return compiled
+    try:
+        compiled, verdicts, failures = verify_book(book, compile_fn)
+    except SqlFailed as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 3
+    for failure in failures:  # those cells are UNRESOLVED in the report; the bundle is still worth writing
+        print(f"error: {failure}", file=sys.stderr)
+    out = args.out or args.workbook.with_name(args.workbook.stem + "_proof")
+    counts = Counter({"PASS": 0, "FAIL": 0, "UNRESOLVED": 0})
+    counts.update(v.status for v in verdicts)
+    proof.bundle(out, args.workbook, book, compiled, verdicts, counts, computed)
+    if computed:
+        print(f"{len(computed)} expected values computed by the formulas library (the file had none saved)")
+    print(f"{counts['PASS']} pass, {counts['FAIL']} fail, {counts['UNRESOLVED']} unresolved -> {out / 'REPORT.md'}")
+    print(f"the bundle is in {out} (check it with: cellproof prove --check {out})")
+    return 3 if failures else 1 if counts["FAIL"] else 0
+
+
+def _diff(args) -> int:
+    """`cellproof diff`: what changed between two versions, and which of it broke an answer.
+
+    Each workbook is verified the way `convert` verifies it (region mode), because those are the verdicts a person
+    acts on; the SQL comparison inside compare() compiles again in cell mode."""
+    books = []
+    for path in (args.old, args.new):
+        try:
+            book = _load_path(path, args.fast)
+        except UnreadableWorkbook as err:
+            print(f"error: {err}", file=sys.stderr)
+            return 2
+        book, _computed, why = fill_missing(book, path)
+
+        def compile_fn(b, why=why):
+            compiled = compile_book(b)
+            if why:
+                compiled.unresolved.update({k: f"{r} ({why})" for k, r in compiled.unresolved.items()
+                                            if r == NO_VALUE})
+            return compiled
+        try:
+            compiled, verdicts, failures = verify_book(book, compile_fn)
+        except SqlFailed as err:
+            print(f"error: {err}", file=sys.stderr)
+            return 3
+        for failure in failures:  # those cells are UNRESOLVED; the diff still says what else changed
+            print(f"error: {failure}", file=sys.stderr)
+        books.append((book, verdicts, compiled.notes))
+    (old_book, old_verdicts, old_notes), (new_book, new_verdicts, new_notes) = books
+    data = diff.compare(old_book, new_book, {v.key: v for v in old_verdicts}, {v.key: v for v in new_verdicts},
+                        old_notes, new_notes)
+    out = args.out or args.new.with_name(args.new.stem + "_diff")
+    page = diff.write_diff(data, out, args.old.name, args.new.name)
+    print(data["summary"])
+    fails = diff.new_fails(data)
+    for v in fails[:5]:
+        print(f"  new FAIL {v['cell']}: Excel {_value(v['expected'])}, SQL {_value(v['actual'])}")
+    if len(fails) > 5:
+        print(f"  and {len(fails) - 5:,} more new FAILs")
+    print(f"-> {out / 'diff.json'}" + (f" and {page.name}" if page else ""))
+    return 1 if fails else 0
+
+
 def _write_sql(text: str) -> None:
     """The SQL as UTF-8 bytes: sheet names and text values can hold any character, and a console encoding that
     cannot print them (Windows' cp1252, or an ASCII redirect) must replace them - a replaced sheet name would make
@@ -180,9 +266,39 @@ def main(argv: list[str] | None = None) -> int:
                        help="read with the single-pass loader (falls back to openpyxl if it cannot)")
     watch.add_argument("--interval", type=float, default=1.0, help="seconds between checks (default: 1.0)")
     watch.add_argument("--runs", type=int, help="stop after this many re-runs (default: until Ctrl+C)")
+    prove = sub.add_parser("prove", help="write a bundle someone else can check, or re-check one",
+                           description="Verify the workbook as `convert` does, then write a folder holding cells.sql "
+                                       "(one runnable DuckDB script answering every cell), report.json, REPORT.md, "
+                                       "and proof.json (the workbook's hash, the tool versions and a seal). "
+                                       "`prove --check DIR` re-checks a bundle without trusting the machine that "
+                                       "made it. The SQL is about 10 MB for 200k formula cells; no compression, "
+                                       "because a proof should be readable.")
+    prove.add_argument("workbook", type=Path, nargs="?")
+    prove.add_argument("--out", type=Path, help="the bundle folder (default: <workbook>_proof next to the file)")
+    prove.add_argument("--fast", action="store_true",
+                       help="read with the single-pass loader (falls back to openpyxl if it cannot)")
+    prove.add_argument("--check", metavar="DIR", help="re-check the bundle in DIR instead of writing one")
+    prove.add_argument("--workbook", dest="check_workbook", type=Path,
+                       help="with --check: also re-read the workbook this bundle names")
+    differ = sub.add_parser("diff", help="what changed between two versions, and which change broke an answer",
+                            description="Verify both workbooks as `convert` does, then say what changed: cells added "
+                                        "and removed, saved input values, formula text, formulas whose text is the same "
+                                        "but whose SQL reads different cells, and verdicts that flipped. Writes "
+                                        "diff.json, plus DIFF.md when the difference is more than a summary. Exit 1 "
+                                        "only when a cell that passed before fails now; a difference alone is not a "
+                                        "failure.")
+    differ.add_argument("old", type=Path)
+    differ.add_argument("new", type=Path)
+    differ.add_argument("--out", type=Path, help="output folder (default: <new>_diff next to the new file)")
+    differ.add_argument("--fast", action="store_true",
+                        help="read with the single-pass loader (falls back to openpyxl if it cannot)")
     args = parser.parse_args(argv)
     if args.command == "sql":
         return _sql(args)
+    if args.command == "prove":
+        return _prove(args)
+    if args.command == "diff":
+        return _diff(args)
     if args.command == "watch":
         try:
             return _watch(args)
@@ -234,13 +350,18 @@ def main(argv: list[str] | None = None) -> int:
             dbt = run_dbt(out)
     groups = impact(compiled.chains, verdicts)
     wrong_answers = wrong(book, verdicts)
+    split = split_failures(book, verdicts, computed)
     counts = write_report(verdicts, compiled.findings, out, args.workbook.name, computed, compiled.notes,
-                          compiled.chains, book, groups, wrong_answers)
+                          compiled.chains, book, groups, wrong_answers, split)
     if computed:
         print(f"{len(computed)} expected values computed by the formulas library (the file had none saved)")
     print(f"{counts['PASS']} pass, {counts['FAIL']} fail, {counts['UNRESOLVED']} unresolved -> {out / 'REPORT.md'}")
     _summarise(groups, wrong_answers)
     if args.stats:
+        if counts["FAIL"]:
+            print(f"Failures: {len(split['primary']):,} to look at, {split['inherited']:,} that read one of them"
+                  + (f", {split['computed_answers_excluded']:,} excluded (expected values from the formulas library)"
+                     if split["computed_answers_excluded"] else ""))
         reasons = Counter(v.reason for v in verdicts if v.status == "UNRESOLVED")
         if reasons:
             print("Unresolved by reason (top 15):")

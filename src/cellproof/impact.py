@@ -9,11 +9,15 @@ A FAIL needs the same treatment: the report lists every failed cell, but a wrong
 a different kind of problem from one that stands alone. `wrong` names the FAIL cells that other formulas read, one
 hop only ("read by", never "blocks"): a reader can itself be wrong, so the count is a neighbourhood, not a
 guarantee.
+
+`split_failures` goes further and uses the same read graph the other way: a FAIL whose own inputs were all right is
+*primary*, one that reads a FAIL is *inherited*. Both are still FAILs - no cell is ever called stale, because we
+cannot see what Excel calculated before the edit - but the split says which ones are worth reading first.
 """
 from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 
 from cellproof.model import Book, Key, Unsupported, Verdict, a1
 from cellproof.r1c1 import lexed
@@ -104,6 +108,71 @@ def readers_of(book: Book, keys) -> dict[Key, list[Key]]:
                     if target != key:
                         out[target].add(key)
     return {k: sorted(v) for k, v in out.items()}
+
+
+def split_failures(book: Book, verdicts: list[Verdict],
+                   computed: frozenset[Key] | set[Key] = frozenset()) -> dict:
+    """The FAILs told apart: those whose inputs were all right, and those that read a FAIL.
+
+    A FAIL reading no FAIL, directly or through other formula cells, is *primary*: the disagreement starts there, so
+    it is either our translation or the value Excel saved. One that reads a FAIL is *inherited*, attributed to the
+    nearest primary it reads, so fixing that primary is the move. Both stay FAILs; nothing is called stale, because
+    the file is the only thing we trust and it does not say when it last calculated.
+
+    A cell whose expected value came from the `formulas` library is left out and counted separately: it has no saved
+    value to disagree with, so the split would be about the library, not the file.
+
+    One call of `readers_of` with every formula's key does the work: it returns the read graph inverted (a cell to
+    the formulas that read it), so a breadth-first walk out from the FAILs finds the inherited ones, and a second
+    walk out from the primaries says which primary each inherited FAIL reaches first."""
+    failed = [v for v in verdicts if v.status == "FAIL"]
+    out: dict = {"primary": [], "inherited": 0, "computed_answers_excluded": 0}
+    counted = [v for v in failed if v.key not in computed]
+    out["computed_answers_excluded"] = len(failed) - len(counted)
+    if not counted:
+        return out
+    by_key = {v.key: v for v in counted}
+    fails = set(by_key)
+    if len(fails) == 1:  # one FAIL reads no other: no graph worth building
+        out["primary"] = [{"cell": a1(next(iter(fails))), "expected": counted[0].expected,
+                           "actual": counted[0].actual, "dependents": 0}]
+        return out
+    readers = readers_of(book, [k for k, c in book.cells.items() if c.formula is not None])
+
+    # Which FAILs a FAIL reads, at any depth: breadth-first over the read graph out from every FAIL. The walk
+    # crosses cells that passed, because a difference can travel through a cell whose own saved value happens to
+    # match, but the cells it crosses are not FAILs and are not counted.
+    inherited: set[Key] = set()
+    reached: set[Key] = set()
+    queue = deque(sorted(fails))
+    while queue:
+        for reader in readers.get(queue.popleft(), ()):
+            if reader in reached:
+                continue
+            reached.add(reader)
+            if reader in fails:
+                inherited.add(reader)
+            queue.append(reader)
+    primary = [k for k in sorted(fails) if k not in inherited]
+    # A primary always exists: following the FAILs upstream through the read graph must end somewhere, because a
+    # cycle of FAILs is impossible - a cycle is UNRESOLVED (see tests/test_impact.py). So every inherited FAIL is
+    # downstream of a primary, and a breadth-first walk out from the primaries reaches all of them.
+    owner: dict[Key, Key] = {k: k for k in primary}  # each cell reached -> the nearest primary upstream
+    queue = deque(primary)
+    while queue:
+        key = queue.popleft()
+        for reader in readers.get(key, ()):
+            if reader not in owner:
+                owner[reader] = owner[key]
+                queue.append(reader)
+    dependents: Counter = Counter(owner[k] for k in inherited if owner.get(k) != k)
+    unreached = inherited - owner.keys()  # cannot happen (a cycle of FAILs is UNRESOLVED), but never lose a cell
+    primary = sorted(primary + sorted(unreached))
+    rows = [{"cell": a1(k), "expected": by_key[k].expected, "actual": by_key[k].actual,
+             "dependents": dependents[k]} for k in primary]
+    out["primary"] = sorted(rows, key=lambda r: (-r["dependents"], r["cell"]))
+    out["inherited"] = len(inherited) - len(unreached)
+    return out
 
 
 def wrong(book: Book, verdicts: list[Verdict]) -> list[dict]:

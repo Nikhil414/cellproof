@@ -85,6 +85,8 @@ cellproof convert book.xlsx --dbt           # also run `dbt build` on the genera
 cellproof convert book.xlsx --stats         # print the unresolved cells' reasons, most common first
 cellproof sql book.xlsx --sheet Sales --range D2:D1000   # the SQL for those cells only
 cellproof watch book.xlsx                  # verify again on every save; print only what changed
+cellproof prove book.xlsx                  # verify, then write a bundle someone else can check
+cellproof diff old.xlsx new.xlsx            # what changed between two versions, and what it broke
 cellproof convert book.xlsx --target postgres            # verify on Postgres too (see below)
 cellproof convert book.xlsx --fast         # read the workbook in one pass (same verdicts, less time)
 ```
@@ -98,8 +100,12 @@ The output folder holds:
 - **`REPORT.md` / `report.json`**: every verdict, failed cells with both values, unresolved cells with the reason,
   findings (for example a number stored as text, which Excel skips in SUM), and which blocks of rows became readable
   table models. The unresolved reasons are ranked by how many cells depend on them ("Where to start"), so a long list
-  of unresolved cells says what to fix first. A failed cell that other formulas read is listed with its readers
-  ("Wrong answers other cells read"), because a wrong value that feeds other cells can spread.
+  of unresolved cells says what to fix first. Failures are split: "Failures to look at" lists the ones whose own
+  inputs were all right (the difference starts there), and a line says how many others read one of them and may be
+  right themselves. A failed cell that other formulas read is also listed with its readers ("Wrong answers other cells
+  read"), because a wrong value that feeds other cells can spread. When the file itself says its saved values may be
+  out of date (manual calculation, a full recalculation pending, no `calcId`, or last saved by a program that is not
+  Excel), `REPORT.md` says so above the tables: recalculate in Excel and run again before believing a FAIL.
 - **A dbt project** (`dbt_project.yml`, `models/`, `seeds/input_cells.csv`) that recomputes the workbook on DuckDB.
   It runs exactly the SQL the verifier checked.
 
@@ -123,6 +129,45 @@ in the script (nothing could read it anyway); the reason is printed to stderr, r
 piped script never quietly loses a cell. Without `--sheet` the whole workbook is the selection (hidden array-constant
 sheets are left out).
 
+### A result you can hand over
+
+`cellproof prove book.xlsx` verifies the workbook exactly as `convert` does, then writes the result as a folder
+someone else can check without trusting you or cellproof:
+
+```bash
+cellproof prove book.xlsx                                # writes book_proof/ next to the file
+cellproof prove book.xlsx --out bundle                   # choose the folder
+cellproof prove --check bundle                           # re-check a bundle: hashes, then the SQL itself
+cellproof prove --check bundle --workbook book.xlsx      # ... and re-read the workbook it names
+```
+
+The folder holds `cells.sql` (one runnable DuckDB script: the input cells, every formula batch in dependency order,
+and a final `SELECT` for every cell), `report.json` and `REPORT.md` (what `convert` would have written), and
+`proof.json` (the workbook's size and hash, the cellproof/DuckDB/Python versions and the platform, the workbook's own
+`<calcPr>` and last-saving program, the counts, and a hash of each file plus one over the set).
+
+Anyone with DuckDB can check the claim by hand: run `cells.sql`, compare each row with `report.json`, hash the
+workbook. `--check` does the same thing and says how it went:
+
+```
+3 files intact
+workbook hash matches
+4 saved values match the report
+cells.sql reproduces 4 of 4 answers
+the bundle checks out
+```
+
+Exit code: `0` every check held, `1` an answer moved (the SQL disagrees with the report, or the workbook no longer
+holds the values the report records), `2` a file, a hash or the format is wrong, `3` DuckDB rejected SQL cellproof
+generated.
+
+The seal is **not a signature**. The hashes catch a file changed by accident or by a casual edit; they cannot stop
+someone with write access to the folder, who can reseal it. What that person still cannot fake is `cells.sql`
+disagreeing with `report.json`, which is why `--check` runs the script instead of stopping at the hashes. `REPORT.md`
+says this in one line under its title. A cell that could not be translated is a hole in `cells.sql`, not a wrong
+answer: `report.json` says why. `cells.sql` is about 10 MB for 200,000 formula cells - no compression, because a proof
+should be readable.
+
 ### Editing while watching
 
 `cellproof watch book.xlsx` verifies the workbook once, then verifies again on every save (it watches the file's
@@ -139,10 +184,47 @@ The first run also prints the counts and where to start, like `convert` does on 
 be read is not an error while you watch: Excel may still be writing it, the last result is kept and the next save is
 another chance.
 
+### Comparing two versions
+
+`cellproof diff old.xlsx new.xlsx` answers the question a person actually has after editing: what changed, and did it
+break anything.
+
+```bash
+cellproof diff old.xlsx new.xlsx                  # writes new_diff/ next to the new file
+cellproof diff old.xlsx new.xlsx --out changes    # choose the folder
+```
+
+Both workbooks are verified exactly as `convert` verifies them, so the verdicts are the ones you would get from
+`convert` on each file. It then reports, with counts:
+
+- **Cells added and removed**, by A1 address.
+- **Saved input values that changed**, with both values - including a value that changed kind (`2` becoming `"2"`).
+- **Formula texts that changed**, with both texts.
+- **Formulas whose text did not change but whose SQL does**: a named range that grew, a table that gained rows, a
+  range's corner that moved. The formula looks identical in both versions and answers differently, which is the case
+  worth a diff at all. This comparison uses a second compile in cell mode, so a block of rows regrouping into a region
+  (or out of one) does not read as hundreds of statements changing.
+- **Verdicts that changed**, per cell, with both values and the reason. A new FAIL is the headline and comes first.
+- **Regions** that verified as a block in one version and not the other, with the compiler's own note saying why.
+
+```
+3 new FAILs, 1 added, 1 input value changed, 1 formula text changed, 4 verdicts changed
+  new FAIL S!B2: Excel 10.0, SQL 27.0
+  ...
+-> new_diff/diff.json and DIFF.md
+```
+
+`diff.json` is always written; `DIFF.md` only when the difference is more than a summary (any verdict change, or ten
+changes in total). Cells are matched by sheet name and A1 address only, so a renamed sheet reads as everything removed
+and everything added - the truth rather than a guess at which sheet became which.
+
+Exit code `1` when a cell that passed before fails now, `0` when it does not. A difference by itself is not a failure:
+`diff` is a question, not a gate.
+
 ### Reading faster
 
-`--fast` (on `convert`, `sql` and `watch`) reads each worksheet once instead of twice. Nothing new to install, no new
-dependency, and no change to what you get out:
+`--fast` (on `convert`, `sql`, `watch`, `prove` and `diff`) reads each worksheet once instead of twice. Nothing new
+to install, no new dependency, and no change to what you get out:
 
 ```bash
 cellproof convert book.xlsx --fast
@@ -274,7 +356,11 @@ cellproof prefers an honest UNRESOLVED or FAIL to a guess. Known limits, each re
 - **Floating point:** a running total becomes a fast window function only when Excel's saved values prove the different
   addition order cannot matter; balances that cancel back to zero (ledgers) are added in Excel's order instead, which
   is slower. Elsewhere SQL can still differ from Excel in the last digits, which would show as an honest FAIL. A
-  number that overflows in `+`, `-`, `*`, `/` or `^` becomes `#NUM!`; overflow inside aggregate functions can still become `inf`.
+  non-finite result from `+`, `-`, `*`, `/` or `^` becomes `#NUM!` on DuckDB, following
+  [Microsoft's documented overflow behavior](https://support.microsoft.com/en-us/excel/how-to-correct-a-num-error).
+  The overflow regressions use synthetic inputs and documentation-derived expectations. PostgreSQL can raise a
+  numeric overflow error before the check runs, leaving the affected batch unresolved. Overflow inside aggregate
+  functions can still become `inf` on DuckDB.
 - **Speed:** regions cover columns that repeat one formula over the same rows, lookups and *IF(S) criteria included.
   A formula that is not part of such a column runs cell by cell (a lookup alone: about 7 s per 1,000). Running totals
   other than plain sums (`=C1*1.05+B2`, `=MAX(C1,B2)`) also run cell by cell.

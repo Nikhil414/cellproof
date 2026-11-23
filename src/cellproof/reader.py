@@ -15,7 +15,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.utils.datetime import CALENDAR_MAC_1904, to_excel
 from openpyxl.worksheet.formula import ArrayFormula
 
-from cellproof.model import Book, Cell, Kind, Unsupported, Value, a1
+from cellproof.model import Book, Calc, Cell, Kind, Unsupported, Value, a1
 from cellproof.tables import Table, expand
 
 ERRORS = {"#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A",
@@ -98,6 +98,35 @@ def _app(z: zipfile.ZipFile) -> str:
     return re.sub(r"[^ -~]", "", m.group(1).decode("utf-8", "replace"))[:80].strip() if m else ""
 
 
+CALC_PR = re.compile(rb"<(?:\w+:)?calcPr\b([^>]*)>")
+CALC_ATTR = re.compile(rb'(\w+)="([^"]*)"')
+
+
+def _calc(z: zipfile.ZipFile) -> Calc:
+    """What xl/workbook.xml's `<calcPr>` says about the values the file holds. Every attribute is None when the file
+    does not state it: a manual-calculation file holds whatever the last full calculation left, and guessing would
+    turn the file's own silence into a claim of ours."""
+    try:
+        info = z.getinfo("xl/workbook.xml")
+    except KeyError:
+        return Calc()
+    if info.file_size > 8 * 1024**2:  # not a workbook part any writer produces: read nothing rather than guess
+        return Calc()
+    m = CALC_PR.search(z.read(info))
+    if m is None:
+        return Calc()
+    attrs = dict(CALC_ATTR.findall(m.group(1)))
+    mode = attrs.get(b"calcMode")
+    full = attrs.get(b"fullCalcOnLoad")
+    calc_id = attrs.get(b"calcId")
+    digits = calc_id.strip() if calc_id else b""
+    return Calc(
+        mode=mode.decode("ascii", "replace") if mode else None,
+        full_on_load=full.strip().lower() not in (b"0", b"false") if full else None,
+        calc_id=int(digits) if digits.isdigit() else None,
+    )
+
+
 def load(path: str | Path) -> Book:
     path = Path(path)
     if path.suffix.lower() not in SUPPORTED:
@@ -106,6 +135,7 @@ def load(path: str | Path) -> Book:
         with zipfile.ZipFile(path) as z:
             size = sum(i.file_size for i in z.infolist())
             app = _app(z)
+            calc = _calc(z)
     except (OSError, zipfile.BadZipFile) as err:
         raise UnreadableWorkbook(f"cannot open {path.name}: {err}") from err
     if size > MAX_UNZIPPED:
@@ -153,7 +183,7 @@ def load(path: str | Path) -> Book:
                 t.displayName or t.name, ws.title, r1, c1, r2, c2, header, int(t.totalsRowCount or 0),
                 tuple(col.name for col in t.tableColumns))
     book = Book(cells, [ws.title for ws in fwb.worksheets], names, max_row, fwb.epoch == CALENDAR_MAC_1904, app,
-                tables=tables)
+                tables=tables, calc=calc)
     _mark_dynamic(path, book)
     spread_blocks(book)
     rewrite_anchors(book)

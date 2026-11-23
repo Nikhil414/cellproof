@@ -23,7 +23,7 @@ from cellproof.expr import (BLANK, CELLS, NO_ERR, Expr, bool_num, any_of, compar
 from cellproof.fn.dynamic import DYNAMIC, spill_batch
 from cellproof.functions import FUNCS
 from cellproof.graph import formula_order
-from cellproof.model import Book, Cell, Key, Unsupported, a1
+from cellproof.model import Book, Cell, Key, Unsupported, a1, other_app
 from cellproof.parser import ARRAYS, Binary, Bool, Call, ErrLit, Num, Postfix, RefNode, Str, Unary, arrays, parse
 from cellproof.rangeindex import RangeIndex, field
 from cellproof.refs import Area, resolve
@@ -44,6 +44,7 @@ TOO_BIG = "formula's SQL would be too large to run"
 # nesting level; checking every node keeps memory near this bound (200k-cell workbooks stay < 10 KB/cell)
 MAX_SQL = 1_000_000
 BIND_SQL = 1_500  # keep repeated arithmetic and overflow checks within bounded chunks
+MAX_ARITH_CHAIN = 512  # keep deep formulas bounded without depending on Python stack depth
 # A batch closes at BATCH cells or when its SQL weighs BATCH_WEIGHT characters, whichever comes first. Time inside one
 # statement grows faster than linearly with its cell count, and lookups are far heavier than plain arithmetic, so a
 # count alone makes lookup-heavy batches slow (measured on DuckDB 1.5.6: 25 VLOOKUP cells 0.2 s, 250 cells 17.8 s).
@@ -203,7 +204,9 @@ class Compiler:
         return error("#N/A") if key is None else self.cell_value(key)
 
     def expr(self, node, sheet: str) -> Expr:
-        e = self._expr(node, sheet)
+        return self._checked(node, self._expr(node, sheet))
+
+    def _checked(self, node, e: Expr) -> Expr:
         size = sum(len(part) for part in (e.sql, e.err, e.txt, e.kind))
         if size > MAX_SQL:
             raise Unsupported(TOO_BIG)
@@ -266,12 +269,37 @@ class Compiler:
             return fn(self, node.args, sheet)
         raise Unsupported(f"cannot translate {node!r}")
 
+    def arithmetic_chain(self, node: Binary, sheet: str) -> Expr:
+        # Walk the left spine without Python recursion, keeping the AST's order
+        # and the same operator context for operands and intermediate bindings.
+        chain = [node]
+        left = node.left
+        while isinstance(left, Binary) and left.op in ARITH:
+            if len(chain) >= MAX_ARITH_CHAIN:
+                raise Unsupported(DEEP)
+            chain.append(left)
+            left = left.left
+        depth = len(self.ctx)
+        self.ctx.extend(["op"] * (len(chain) - 1))
+        try:
+            result = self.expr(left, sheet)
+            for part in reversed(chain):
+                x, y = num(result), num(self.expr(part.right, sheet))
+                result = finite_num(f"({x.sql} {part.op} {y.sql})", errs(x.err, y.err))
+                if part is not node:
+                    self.ctx.pop()
+                    result = self._checked(part, result)
+            return result
+        finally:
+            del self.ctx[depth:]
+
     def binary(self, node: Binary, sheet: str) -> Expr:
-        a, b, op = self.expr(node.left, sheet), self.expr(node.right, sheet), node.op
-        if op in ARITH or op in ("/", "^"):
+        op = node.op
+        if op in ARITH:
+            return self.arithmetic_chain(node, sheet)
+        a, b = self.expr(node.left, sheet), self.expr(node.right, sheet)
+        if op in ("/", "^"):
             x, y = num(a), num(b)
-            if op in ARITH:
-                return finite_num(f"({x.sql} {op} {y.sql})", errs(x.err, y.err))
             if op == "/":  # DuckDB gives inf, Excel #DIV/0!
                 return finite_num(f"({x.sql} / NULLIF({y.sql}, 0))",
                             errs(x.err, y.err, f"(CASE WHEN {y.sql} = 0 THEN '#DIV/0!' END)"))
@@ -395,7 +423,7 @@ def compile_book(book: Book, regions: bool = True) -> Compiled:
     order, unresolved, kept = order_with_regions(book, scan.regions)
     comp = Compiler(book)
     chains: dict[Key, Key] = {}  # cell -> the unresolved cell that stopped its compile (see impact.py)
-    if book.app and not (book.app.startswith("Microsoft") and "Compatible" not in book.app):  # openpyxl: "Compatible"
+    if other_app(book):  # openpyxl writes "Compatible", which is unknown rather than somebody else (see model.py)
         comp.findings.append(f"the file was last saved by {book.app}, not Microsoft Excel: its saved values follow that "
                              "program's rules, so a FAIL can be a difference between that program and Excel")
     batches: list = []

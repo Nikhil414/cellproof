@@ -46,6 +46,28 @@ class Cell:
         return (self.sheet, self.row, self.col)
 
 
+@dataclass(frozen=True)
+class Calc:
+    """What the file says about the values it saved: xl/workbook.xml's `<calcPr>`. None where the file is silent -
+    the attributes are recorded, never guessed, because a manual-calculation file holds whatever the last full
+    calculation left."""
+
+    mode: str | None = None  # "auto", "manual", "autoNoTable"
+    full_on_load: bool | None = None  # Excel will recalculate everything when the file is next opened
+    calc_id: int | None = None  # the calculation engine's stamp; absent or 0 means Excel probably did not write this
+
+
+def other_app(book: Book | None) -> str:
+    """The program that last saved the file, when it is not Microsoft Excel: its saved values follow its own rules.
+
+    openpyxl writes "Compatible" rather than Excel, so that one counts as unknown, not as somebody else. Both the
+    compiler's finding and the report's warning use this, so they can never say different things."""
+    app = book.app if book is not None else ""
+    if app and not (app.startswith("Microsoft") and "Compatible" not in app):
+        return app
+    return ""
+
+
 @dataclass
 class Book:
     cells: dict[Key, Cell]
@@ -57,6 +79,7 @@ class Book:
     arrays: set[str] = field(default_factory=set)  # hidden sheets of array constants (cellproof.parser.ARRAY_SHEET)
     tables: dict = field(default_factory=dict)  # TABLE NAME (upper) -> cellproof.tables.Table
     unread: dict = field(default_factory=dict)  # formula cell -> why its structured references were not rewritten
+    calc: Calc = field(default_factory=Calc)  # what the file says about its own saved values
 
     @cached_property
     def _rows_by_col(self) -> dict[tuple[str, int], list[int]]:

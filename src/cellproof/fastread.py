@@ -30,7 +30,7 @@ from openpyxl.xml.constants import ARC_CONTENT_TYPES, COMMENTS_NS, SHARED_STRING
 from openpyxl.xml.functions import fromstring
 
 from cellproof import reader
-from cellproof.model import Book, Cell
+from cellproof.model import Book, Calc, Cell
 from cellproof.reader import UnreadableWorkbook
 from cellproof.tables import Table
 
@@ -110,7 +110,7 @@ def _saved(value, data_type: str, epoch) -> tuple:
     return reader._text(str(value)), "s"
 
 
-def _read(path: Path, app: str) -> Book:
+def _read(path: Path, app: str, calc: Calc) -> Book:
     with zipfile.ZipFile(path) as z:
         valid = z.namelist()
         package = Manifest.from_tree(fromstring(z.read(ARC_CONTENT_TYPES)))
@@ -187,7 +187,7 @@ def _read(path: Path, app: str) -> Book:
                 t.displayName or t.name, ws.title, r1, c1, r2, c2, header, int(t.totalsRowCount or 0),
                 tuple(col.name for col in t.tableColumns))
     return Book(cells, [ws.title for ws in wb.worksheets], names, max_row, wb.epoch == CALENDAR_MAC_1904, app,
-                tables=tables)
+                tables=tables, calc=calc)
 
 
 def load(path: str | Path) -> Book:
@@ -198,13 +198,14 @@ def load(path: str | Path) -> Book:
         with zipfile.ZipFile(path) as z:
             size = sum(i.file_size for i in z.infolist())
             app = reader._app(z)
+            calc = reader._calc(z)
     except (OSError, zipfile.BadZipFile) as err:
         raise UnreadableWorkbook(f"cannot open {path.name}: {err}") from err
     if size > reader.MAX_UNZIPPED:
         raise UnreadableWorkbook(f"cannot open {path.name}: it unzips to {size / 1024**3:.1f} GB, more than the "
                                  f"{reader.MAX_UNZIPPED // 1024**3} GB limit")
     try:
-        book = _read(path, app)
+        book = _read(path, app, calc)
     except UnreadableWorkbook:
         raise
     except Exception as err:  # openpyxl raises many types for corrupt or encrypted files

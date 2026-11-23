@@ -1,5 +1,56 @@
 # Changelog
 
+## 1.2.0 (2026-11-22)
+
+- **`cellproof diff old.xlsx new.xlsx`: what changed between two versions, and what it broke.** Both workbooks are
+  verified exactly as `convert` verifies them, so every verdict is one `convert` would give. It reports, with counts:
+  cells added and removed (by A1 address), saved input values that changed with both values (including a change of
+  kind, `2` becoming `"2"`), formula texts that changed with both texts, verdicts that changed per cell with both
+  values and the reason (a new FAIL is the headline and comes first, then UNRESOLVED, then PASS; vanished cells and
+  cells that newly appear and pass are left out), and regions that verified as a block in one version and not the
+  other, with the compiler's own note. The case only a diff exists for: **a formula whose text did not change but
+  whose SQL does** - a named range that grew, a table that gained rows, a range's corner that moved. That comparison
+  comes from a second compile in cell mode, canonicalised to one text per cell (cell tags in place of batch names),
+  so a block of rows regrouping into a region - or out of one - does not read as hundreds of statements changing.
+  Cells are matched by sheet name and A1 address only: a renamed sheet reads as everything removed and everything
+  added, the truth rather than a guess at which sheet became which. `diff.json` is always written; `DIFF.md` only
+  when a verdict changed or ten changes in total, and its headline names the new FAILs and says a formula that reads
+  a wrong answer is usually wrong too - it never claims to know which to fix first. Exit 1 only when a cell that
+  passed before fails now: a difference by itself is not a failure. `--fast` works here too.
+- **FAILs are split: the ones to look at, and the ones that only read them.** A primary FAIL reads no FAIL, directly
+  or through other formula cells, so the difference starts at that cell; an inherited FAIL reads one and may be
+  right itself, and is attributed to the nearest primary it reaches. `REPORT.md` replaces the flat failed-cell table
+  with "Failures to look at" (primary, with how many failed cells read each) plus a line counting the inherited ones;
+  `report.json` gains a `failures` key, and `--stats` prints the two counts. Cells whose expected value came from the
+  `formulas` library have no saved value to disagree with, so they are excluded and counted separately. Nothing is
+  ever labelled stale: both kinds stay FAILs.
+- **The report quotes the file's own evidence that its saved values may be out of date.** `calcMode="manual"`, a
+  pending `fullCalcOnLoad="1"`, a missing `calcId`, or a last-saving program that is not Microsoft Excel each put one
+  sentence above the failure tables: recalculate (F9) and save in Excel, then run again. A clean Excel file gets no
+  sentence, and a file with no FAILs gets none either.
+- **`cellproof prove`: a result you can hand to someone.** It verifies the workbook as `convert` does, then writes a
+  folder holding `cells.sql` (one runnable DuckDB script: the input cells, every formula batch in dependency order, a
+  final `SELECT` for every cell), `report.json` and `REPORT.md` (what `convert` would have written), and `proof.json`
+  (the workbook's size and hash, the cellproof/DuckDB/Python versions and the platform, the workbook's own `<calcPr>`
+  attributes and last-saving program, the counts, a hash per file and one over the set).
+- **`cellproof prove --check DIR [--workbook book.xlsx]`** re-checks a bundle without trusting the machine that made
+  it: it re-hashes the files, optionally re-reads the workbook and compares the values it holds with the ones the
+  report records as Excel's, and runs `cells.sql` on a fresh DuckDB to see whether it still answers what `report.json`
+  says. Exit code 0 (all held), 1 (an answer moved), 2 (a file, a hash or the format is wrong), 3 (cellproof generated
+  SQL DuckDB rejected). Console output is unchanged for every other command.
+- **The seal is not a signature, and the report says so.** The hashes catch an accident or a casual edit; they cannot
+  stop someone with write access to the folder, who can reseal. What that person cannot fake is `cells.sql`
+  disagreeing with `report.json`, which is why `--check` runs the script rather than stopping at the hashes. One line
+  under `REPORT.md`'s title states it.
+- **One notion of "equal".** `verifier.matches` is now a thin wrapper over a new plain `verifier.same(kind, num, txt,
+  other_kind, other)`; `prove --check` compares answers with it, so a bundle can never pass `--check` on a value the
+  verifier would call a FAIL.
+- **`Book.calc`** records the workbook's `<calcPr>` (`calcMode`, `fullCalcOnLoad`, `calcId`, all `None` when the file
+  is silent) next to `Book.app`, through both loaders. It is only read, never acted on: 1.2 does not decide whether a
+  saved value is stale.
+- Runtime dependencies are still only `openpyxl` and `duckdb`; the bundle is DuckDB-only, and `proof.json` records
+  which engine produced the verdicts so a Postgres proof can come later without changing the format.
+
 ## 1.1.1 (2026-11-18)
 
 - **`--fast`: read the workbook in one pass.** `cellproof convert`, `cellproof sql` and `cellproof watch` accept
