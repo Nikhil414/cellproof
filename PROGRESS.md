@@ -285,11 +285,11 @@ issue #14).
      a second cell-mode compile, because regions may merge or split differently between the two files. 18 tests in
      `tests/test_diff.py`; spikes showed a bounded or whole-column range does not move cell-mode SQL but a named
      range that grows does. 1.2 is done.
-2. **Land the two PR #5 follow-ups** (done locally on `fix/diff-bindings-and-notes`, PR pending): the README line for
-   results between Excel's 9.99e307 ceiling and a double's 1.79e308 (an honest FAIL, never a PASS), and `diff`
-   comparing a long formula's bound `cN_exprM` layers - otherwise a change inside one is missed and a cell that moves
-   batch position reports a fake "SQL changed", and a compared SQL that runs long is prefixed in `DIFF.md` so one
-   change cannot make an unreadable table row. 720 pass locally.
+2. **The two PR #5 follow-ups landed (PR #34, merged 2026-11-23 as `ea25028`)**: the README line for results between
+   Excel's 9.99e307 ceiling and a double's 1.79e308 (an honest FAIL, never a PASS), and `diff` comparing a long
+   formula's bound `cN_exprM` layers - otherwise a change inside one is missed and a cell that moves batch position
+   reports a fake "SQL changed"; a compared SQL that runs long is prefixed in `DIFF.md` so one change cannot make an
+   unreadable table row. 720 pass locally, 13/13 CI green. These ship in the next patch release.
 3. **PR #23** (TAKE/DROP/CHOOSECOLS/CHOOSEROWS/TOCOL/TOROW): MilindLate rebased 2026-11-21 and fixed the four
    flagged spots himself (negative TAKE/DROP from the end, count 0 -> `#CALC!`, `ignore` 2/3 keeping unchecked
    markers, `postgres.py` hunk dropped). Blocked on him: 4 commits behind `main`, so it needs a rebase, and the
