@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Six dynamic-array functions: `TAKE`, `DROP`, `CHOOSEROWS`, `CHOOSECOLS`, `TOCOL`, `TOROW`.** Each either
+  translates exactly or raises `Unsupported`; none guesses. Rows and columns count from the start of the array, a
+  negative count from its end, and a fully emptied array is handled the same way `FILTER`'s empty result is.
+  **The boundary error codes are not yet proven.** For `TAKE`/`DROP` with a count of zero, and for a `CHOOSEROWS`/
+  `CHOOSECOLS` index that is zero or past the end, Excel documents `#CALC!` and `#VALUE!`. The tests agree with those
+  codes, but the expected values come from Microsoft's documentation, not from an Excel-saved workbook, so the
+  fixtures confirm the code does what the code says rather than that Excel does it. Microsoft's documentation was
+  already wrong once about this exact family (`FILTER` returning nothing), so these need an Excel-saved file before
+  they count as ground truth. A real workbook that disagrees would turn an expectation, not a translation, into a fix.
+- **Fixed: `DROP` past the end of a dynamically-sized array answered a wrong number instead of raising.**
+  `DROP` checked for "this drops everything" only against arrays whose height it knew while compiling. For a
+  `FILTER` result, whose height is known only when the query runs, the check was skipped: dropping more rows than
+  existed produced an empty relation, and `SUM` over it answered `0.0` and `COUNT` answered `0.0`, where Excel
+  raises an error. A count is the worst result to invent - it looks like a value and the report marks the cell
+  PASS. Such a result now becomes `UNCHECKED` and reads as UNRESOLVED, the rule `FILTER` already follows, because
+  which code Excel raises here is the open question above. Dropping rows that leave rows behind is still answered
+  exactly, and a spill of the emptied array no longer shows a bare `#N/A`.
 - **Fixed: `cellproof diff` could miss a change inside a long arithmetic formula.** A formula too big to keep as one
   expression has its sub-results bound into numbered layers, so what the cell actually computes is split across them.
   The comparison read only the outer expression, so two different long formulas could compare as the same SQL: a

@@ -85,8 +85,18 @@ def test_what_excel_was_not_asked_is_not_guessed(tmp_path):
         # empty sort keys, in a block bigger than the one element: UNRESOLVED, not a #SPILL! FAIL
         **spill("L6", "_xlfn._xlws.SORT(G1:G3)", [[0.0], [0.0], [1.0]]),
         "J9": ("=_xlfn._xlws.FILTER(A2:A5,C2:C5>50)", "Asha"),           # not an array formula
+        "J10": ("=COUNT(_xlfn.TOCOL(_xlfn._xlws.SORT(H1:H1),2))", 0.0), # preserves UNCHECKED marker
+        # DROP past the end of a FILTER result: the array's size is known only at run time, so whether this empties
+        # it is too. An empty relation answered 0.0 from SUM and COUNT, which is a wrong number, not an error.
+        "J11": ("=SUM(_xlfn.DROP(_xlfn._xlws.FILTER(A2:C5,C2:C5>50),3))", "#CALC!"),
+        "J12": ("=COUNT(_xlfn.DROP(_xlfn._xlws.FILTER(A2:C5,C2:C5>50),3))", "#CALC!"),
+        "J13": ("=ROWS(_xlfn.DROP(_xlfn._xlws.FILTER(A2:C5,C2:C5>50),3))", "#CALC!"),
+        "J14": ("=SUM(_xlfn.DROP(_xlfn._xlws.FILTER(A2:C5,C2:C5>50),,3))", "#CALC!"),
+        # ... but a DROP that leaves rows behind is still answered
+        "J15": ("=SUM(_xlfn.DROP(_xlfn._xlws.FILTER(A2:C5,C2:C5>50),1))", 60.0),
     })
-    assert set(bad) == {("S", 6, 10), ("S", 6, 11), ("S", 6, 12), ("S", 7, 12), ("S", 8, 12), ("S", 9, 10)}
+    assert set(bad) == {("S", 6, 10), ("S", 6, 11), ("S", 6, 12), ("S", 7, 12), ("S", 8, 12), ("S", 9, 10), ("S", 10, 10),
+                        ("S", 11, 10), ("S", 12, 10), ("S", 13, 10), ("S", 14, 10)}
     assert all(v[0] == "UNRESOLVED" for v in bad.values())
 
 
@@ -131,3 +141,75 @@ def test_corpus_findings_for_sortby_filter_and_xmatch(tmp_path):
         "N3": ('=_xlfn.XMATCH("ss",{1,"ß"},0)', 2.0),
     })
     assert set(bad) == {("S", 1, 14), ("S", 3, 14)} and all(v[0] == "UNRESOLVED" for v in bad.values())
+
+
+def test_take_and_drop(tmp_path):
+    _, bad = check(tmp_path, {
+        **spill("J1", "_xlfn.TAKE(A2:C5,2)", [["Asha", "West", 80.0], ["Ravi", "East", 40.0]]),
+        **spill("J3", "_xlfn.TAKE(A2:C5,2,2)", [["Asha", "West"], ["Ravi", "East"]]),
+        **spill("J5", "_xlfn.TAKE(A2:C5,,1)", [["Asha"], ["Ravi"], ["Mina"], ["Vikram"]]),
+        **spill("J9", "_xlfn.DROP(A2:C5,2)", [["Mina", "west", 60.0], ["Vikram", "North", 40.0]]),
+        **spill("J11", "_xlfn.DROP(A2:C5,2,1)", [["west", 60.0], ["North", 40.0]]),
+        **spill("J13", "_xlfn.DROP(A2:C5,,2)", [[80.0], [40.0], [60.0], [40.0]]),
+        # Negative counts and zero count (#CALC!)
+        **spill("N1", "_xlfn.TAKE(A2:C5,-2)", [["Mina", "west", 60.0], ["Vikram", "North", 40.0]]),
+        **spill("N3", "_xlfn.TAKE(A2:C5,,-1)", [[80.0], [40.0], [60.0], [40.0]]),
+        **spill("N7", "_xlfn.TAKE(A2:C5,-1,-2)", [["North", 40.0]]),
+        **spill("N8", "_xlfn.TAKE(A2:C5,0)", [["#CALC!"]]),
+        **spill("R1", "_xlfn.DROP(A2:C5,-2)", [["Asha", "West", 80.0], ["Ravi", "East", 40.0]]),
+        **spill("R3", "_xlfn.DROP(A2:C5,,-1)", [["Asha", "West"], ["Ravi", "East"], ["Mina", "west"], ["Vikram", "North"]]),
+        **spill("R7", "_xlfn.DROP(A2:C5,0)", [["#CALC!"]]),
+    })
+    assert bad == {}
+
+
+def test_chooserows_and_choosecols(tmp_path):
+    _, bad = check(tmp_path, {
+        **spill("J1", "_xlfn.CHOOSEROWS(A2:C5,4,1)", [["Vikram", "North", 40.0], ["Asha", "West", 80.0]]),
+        **spill("J3", "_xlfn.CHOOSEROWS(A2:C5,2,2)", [["Ravi", "East", 40.0], ["Ravi", "East", 40.0]]),
+        **spill("J5", "_xlfn.CHOOSECOLS(A2:C5,3,1)", [[80.0, "Asha"], [40.0, "Ravi"], [60.0, "Mina"], [40.0, "Vikram"]]),
+        **spill("J9", "_xlfn.CHOOSECOLS(A2:C5,2)", [["West"], ["East"], ["west"], ["North"]]),
+        **spill("J13", "_xlfn.CHOOSEROWS(A2:C5,10)", [["#VALUE!"]]),
+        **spill("J14", "_xlfn.CHOOSECOLS(A2:C5,5)", [["#VALUE!"]]),
+        # Negative indices count from end, zero and out-of-bounds return #VALUE!
+        **spill("N1", "_xlfn.CHOOSEROWS(A2:C5,-1)", [["Vikram", "North", 40.0]]),
+        **spill("N2", "_xlfn.CHOOSEROWS(A2:C5,-2,-1)", [["Mina", "west", 60.0], ["Vikram", "North", 40.0]]),
+        **spill("N4", "_xlfn.CHOOSECOLS(A2:C5,-1)", [[80.0], [40.0], [60.0], [40.0]]),
+        **spill("N8", "_xlfn.CHOOSECOLS(A2:C5,-3,-1)", [["Asha", 80.0], ["Ravi", 40.0], ["Mina", 60.0], ["Vikram", 40.0]]),
+        **spill("N12", "_xlfn.CHOOSEROWS(A2:C5,0)", [["#VALUE!"]]),
+        **spill("N13", "_xlfn.CHOOSECOLS(A2:C5,0)", [["#VALUE!"]]),
+        **spill("N14", "_xlfn.CHOOSEROWS(A2:C5,-10)", [["#VALUE!"]]),
+        **spill("N15", "_xlfn.CHOOSECOLS(A2:C5,-10)", [["#VALUE!"]]),
+    })
+    assert bad == {}
+
+
+def test_tocol_and_torow(tmp_path):
+    _, bad = check(tmp_path, {
+        **spill("J1", "_xlfn.TOCOL(A2:B3)", [["Asha"], ["West"], ["Ravi"], ["East"]]),
+        **spill("J5", "_xlfn.TOCOL(A2:B3,,TRUE)", [["Asha"], ["Ravi"], ["West"], ["East"]]),
+        **spill("J9", "_xlfn.TOROW(A2:B3)", [["Asha", "West", "Ravi", "East"]]),
+        **spill("J10", "_xlfn.TOROW(A2:B3,,TRUE)", [["Asha", "Ravi", "West", "East"]]),
+        **spill("J11", "_xlfn.TOCOL(G1:G3,1)", [[1.0]]),
+        **spill("J12", "_xlfn.TOROW(G1:G3,1)", [[1.0]]),
+        # All elements ignored produces an empty relation which answers #CALC!
+        **spill("J13", "_xlfn.TOCOL(G2:G3,1)", [["#CALC!"]]),
+        **spill("J14", "_xlfn.TOROW(G2:G3,1)", [["#CALC!"]]),
+    })
+    assert bad == {}
+
+
+def test_new_dynamic_nesting_and_aggregates(tmp_path):
+    _, bad = check(tmp_path, {
+        **spill("J1", "_xlfn.TAKE(_xlfn.CHOOSEROWS(A2:C5,4,3,2,1),2)",
+                [["Vikram", "North", 40.0], ["Mina", "west", 60.0]]),
+        **spill("J3", "_xlfn.CHOOSECOLS(_xlfn._xlws.FILTER(A2:C5,C2:C5>50),1,3)",
+                [["Asha", 80.0], ["Mina", 60.0]]),
+        # Out-of-bounds row/col index against dynamic relation returns #VALUE!
+        **spill("J5", "_xlfn.CHOOSEROWS(_xlfn._xlws.FILTER(A2:C5,C2:C5>50),1,3)", [["#VALUE!"]]),
+        **spill("J6", "_xlfn.CHOOSECOLS(_xlfn._xlws.FILTER(A1:C1,E1:G1),1,3)", [["#VALUE!"]]),
+        "J7": ("=ROWS(_xlfn.TAKE(A2:C5,2))", 2.0),
+        "J8": ("=COLUMNS(_xlfn.CHOOSECOLS(A2:C5,3,1))", 2.0),
+        "J9": ("=SUM(_xlfn.TOCOL(C2:C3))", 120.0),
+    })
+    assert bad == {}
